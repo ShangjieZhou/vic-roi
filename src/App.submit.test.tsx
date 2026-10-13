@@ -346,29 +346,30 @@ describe('the analysis page', () => {
   })
 
   describe('percentile bar', () => {
-    it('ranks the candidate among everyone and shows the median and the average', async () => {
+    it('ranks the candidate among everyone and shows the score and the median', async () => {
       await open(withCharts)
       expect(screen.getByText('Among all 12 submitted candidates')).toBeTruthy()
       expect(screen.getAllByText('You: top 45%').length).toBeGreaterThan(0)
       expect(screen.getByText('Your score').nextSibling?.textContent).toBe('546')
       expect(screen.getByText('Median').nextSibling?.textContent).toBe('520')
-      expect(screen.getByText('Average').nextSibling?.textContent).toBe('530')
+      expect(screen.queryByText('Average')).toBeNull()
       expect(screen.getByText('Lowest')).toBeTruthy()
       expect(screen.getByText('Highest')).toBeTruthy()
     })
 
-    it('places the candidate at their percentile, the median at 50 and the average at its own percentile', async () => {
+    it('places the candidate at their percentile and the median at 50, with no average mark', async () => {
       await open(withCharts)
       const bar = screen.getByRole('img', { name: 'You: top 45%' })
       const at = (pct: number) => bar.querySelector(`[style*="left: ${pct}%"]`)
       expect(at(55)).toBeTruthy() // the candidate
       expect(at(50)).toBeTruthy() // the median, by definition
-      expect(at(52)).toBeTruthy() // the average
+      expect(at(52)).toBeNull() // no average
+      expect(bar.querySelector('.bg-amber-500')).toBeNull()
     })
 
-    it('copes with a server that does not send the average', async () => {
-      await open({ ...withCharts, overall: { ...withCharts.overall, mean: undefined, meanPercentile: undefined } })
-      expect(screen.getByText('Average').nextSibling?.textContent).toBe('-')
+    it('shows two figures, the score and the median', async () => {
+      await open(withCharts)
+      expect(document.querySelectorAll('dl > div')).toHaveLength(2)
     })
 
     it('is shown in Chinese', async () => {
@@ -377,7 +378,7 @@ describe('the analysis page', () => {
       expect(screen.getAllByText('您：前45%').length).toBeGreaterThan(0)
       expect(screen.getByText('您的分数')).toBeTruthy()
       expect(screen.getByText('中位数')).toBeTruthy()
-      expect(screen.getByText('平均分')).toBeTruthy()
+      expect(screen.queryByText('平均分')).toBeNull()
     })
   })
 
@@ -510,13 +511,13 @@ const full: Insights = {
   ...withCharts,
   total: 546,
   overall: {
-    ...withCharts.overall, n: 40, percentile: 62, median: 530, mean: 535, meanPercentile: 58,
+    ...withCharts.overall, n: 40, percentile: 62, p25: 505, median: 530, p75: 560, mean: 535, meanPercentile: 58,
     scoreHist: hist96({ 50: 10, 54: 20, 58: 10 }),
   },
-  locationGroup: { n: 35, percentile: 60, median: 535, scoreHist: hist96({ 50: 10, 54: 15, 58: 10 }) },
+  locationGroup: { n: 35, percentile: 60, p25: 510, median: 535, p75: 565, scoreHist: hist96({ 50: 10, 54: 15, 58: 10 }) },
   occupation: {
     name: 'Software engineer', code: '261313', level: 4, prefix: '2613',
-    n: 8, percentile: 80, median: 560, mean: 555, meanPercentile: 70,
+    n: 8, percentile: 80, p25: 545, median: 560, p75: 580, mean: 555, meanPercentile: 70,
     scoreHist: hist96({ 54: 4, 58: 4 }),
     categoryPercentile: { age: 90, english: 70, experience: 55, education: 44, skillLevel: 66, partner: 50, earnings: 77 },
     categoryDist: {
@@ -563,14 +564,30 @@ describe('distribution under each ranking', () => {
     expect(screen.getByRole('group', { name: /How 35 candidates scored/ })).toBeTruthy()
   })
 
-  it('shows each bar\'s score range of 20 points on hover', async () => {
+  it('shows each bar\'s score range of 20 points in a tooltip', async () => {
     await openFull(full)
     const chart = screen.getByRole('group', { name: /How 40 candidates scored/ })
     // The test data puts 10 candidates in the 500 to 519 points bar.
-    expect(within(chart).getByTitle('500 to 519 points: 10 candidates')).toBeTruthy()
+    expect(within(chart).getByLabelText('500 to 519 points: 10 candidates')).toBeTruthy()
     for (const bar of within(chart).getAllByRole('button')) {
-      expect(bar.getAttribute('title')).toMatch(/^\d+ to \d+ points: \d+ candidates?$/)
+      expect(bar.getAttribute('aria-label')).toMatch(/^\d+ to \d+ points: \d+ candidates?$/)
     }
+    expect(within(chart).queryByRole('tooltip')).toBeNull()
+    fireEvent.pointerMove(chart, { clientX: 5, pointerType: 'mouse' })
+    expect(within(chart).queryByRole('tooltip')).toBeNull() // no layout in the test browser, so no bar is under it
+  })
+
+  it('marks 25%, 50% and 75% on the score axis of each ranking', async () => {
+    await openFull(full)
+    const chart = screen.getByRole('group', { name: /How 40 candidates scored/ })
+    const axis = chart.parentElement!
+    expect([...axis.querySelectorAll('[data-mark]')].map((m) => m.textContent)).toEqual(['25%505', '50%530', '75%560'])
+    expect(document.querySelectorAll('[data-mark]')).toHaveLength(9)
+  })
+
+  it('draws no marks when the server sent no quartiles', async () => {
+    await openFull({ ...full, overall: { ...full.overall, p25: undefined, p75: undefined } })
+    expect(document.querySelectorAll('[data-mark]')).toHaveLength(6)
   })
 
   it('draws no graph for a group the server sent no histogram for', async () => {

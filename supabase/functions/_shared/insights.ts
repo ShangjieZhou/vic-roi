@@ -13,6 +13,9 @@ export interface PoolStats {
   // Share of candidates (0 to 100) scoring below this one, ties counted as half.
   percentile?: number
   median?: number
+  // The scores 25% and 75% of candidates fall below.
+  p25?: number
+  p75?: number
   mean?: number
   // Where the mean score sits in the same ranking (0 to 100).
   meanPercentile?: number
@@ -74,6 +77,8 @@ export interface ComparisonRow {
   // Undefined when this candidate is the only one in the group so far.
   percentile?: number
   median?: number
+  p25?: number
+  p75?: number
   // Candidates per 10-point band of the total, for the distribution graph.
   hist?: number[]
   // For the occupation row: how wide the group is. See Insights.occupation.
@@ -92,6 +97,8 @@ export function comparisonRows(insights: Insights): ComparisonRow[] {
       n: stats.n,
       percentile: isRanked(stats) ? stats.percentile : undefined,
       median: isRanked(stats) ? stats.median : undefined,
+      p25: isRanked(stats) ? stats.p25 : undefined,
+      p75: isRanked(stats) ? stats.p75 : undefined,
       hist: isRanked(stats) ? stats.scoreHist : undefined,
       ...extra,
     })

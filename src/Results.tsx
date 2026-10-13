@@ -462,7 +462,17 @@ function Comparison({ insights }: { insights: Insights }) {
               </span>
             </div>
             {row.hist && row.percentile !== undefined && (
-              <Distribution hist={row.hist} mine={insights.total} median={row.median} n={row.n} />
+              <Distribution
+                hist={row.hist}
+                mine={insights.total}
+                median={row.median}
+                marks={
+                  row.p25 !== undefined && row.p75 !== undefined && row.median !== undefined
+                    ? { p25: row.p25, median: row.median, p75: row.p75 }
+                    : undefined
+                }
+                n={row.n}
+              />
             )}
           </li>
         ))}
@@ -472,15 +482,13 @@ function Comparison({ insights }: { insights: Insights }) {
 }
 
 // Every submitted score ranked from lowest to highest, as a bar from the 0th to the 100th percentile. The
-// candidate sits at their own percentile, and the median and the average are marked on the same bar.
+// candidate sits at their own percentile, and the median is marked on the same bar.
 function PercentileBar({ insights }: { insights: Insights }) {
   const { t } = useI18n()
   const { overall } = insights
   if (!isRanked(overall)) return null
   const p = overall.percentile
   const top = topPercent(p)
-  const mean = overall.mean
-  const meanAt = overall.meanPercentile
 
   return (
     <section>
@@ -495,7 +503,6 @@ function PercentileBar({ insights }: { insights: Insights }) {
         <div className="absolute inset-y-0 left-0 rounded-full bg-indigo-200" style={{ width: `${p}%` }} />
         {/* The median is the 50th percentile by definition. */}
         <Tick at={50} className="bg-stone-900" />
-        {meanAt !== undefined && <Tick at={meanAt} className="bg-amber-500" />}
         <div
           className="absolute top-1/2 size-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-accent shadow"
           style={{ left: `${p}%` }}
@@ -512,10 +519,9 @@ function PercentileBar({ insights }: { insights: Insights }) {
         <span>{t('rank.high')}</span>
       </div>
 
-      <dl className="mt-4 grid grid-cols-3 gap-3 text-center">
+      <dl className="mt-4 grid grid-cols-2 gap-3 text-center">
         <Stat label={t('rank.score')} value={String(insights.total)} swatch="bg-accent" highlight />
         <Stat label={t('rank.median')} value={String(overall.median)} swatch="bg-stone-900" />
-        <Stat label={t('rank.average')} value={mean === undefined ? '-' : String(mean)} swatch="bg-amber-500" />
       </dl>
     </section>
   )
