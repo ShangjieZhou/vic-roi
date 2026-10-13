@@ -32,6 +32,10 @@ import { SECTION_SCORES, medianScore, topPercent, typicalFor } from './sectionSc
 import { Distribution } from './Distribution'
 import { Turnstile } from './Turnstile'
 
+// Each block of the analysis sits on its own slightly darker card, with the white cards inside it.
+const SECTION_CARD = 'rounded-2xl bg-stone-100 p-5'
+const SECTION_TITLE = 'text-xl font-semibold tracking-tight'
+
 export function Results(props: {
   draft: VptDraft
   submission: Submission | null
@@ -310,8 +314,8 @@ function InsightsPanel(props: {
         <>
           <PercentileBar insights={insights} />
           <Comparison insights={insights} />
-          <section>
-            <h3 className="mb-4 text-lg font-semibold tracking-tight">{t('res.breakdown')}</h3>
+          <section className={SECTION_CARD}>
+            <h3 className={`mb-4 ${SECTION_TITLE}`}>{t('res.breakdown')}</h3>
             <ScoreBreakdown low={props.result} high={props.result} earningsNote={props.earningsNote} />
           </section>
           <SectionCharts result={props.result} insights={insights} />
@@ -437,8 +441,8 @@ function Comparison({ insights }: { insights: Insights }) {
   }
 
   return (
-    <div>
-      <h3 className="text-lg font-semibold tracking-tight">{t('cmp.title')}</h3>
+    <div className={SECTION_CARD}>
+      <h3 className={SECTION_TITLE}>{t('cmp.title')}</h3>
       <ul className="mt-3 grid gap-2">
         {rows.map((row) => (
           <li key={row.kind} className="rounded-xl bg-white px-4 py-3">
@@ -491,8 +495,8 @@ function PercentileBar({ insights }: { insights: Insights }) {
   const top = topPercent(p)
 
   return (
-    <section>
-      <h3 className="text-lg font-semibold tracking-tight">{t('rank.title')}</h3>
+    <section className={SECTION_CARD}>
+      <h3 className={SECTION_TITLE}>{t('rank.title')}</h3>
       <p className="mt-0.5 text-sm text-stone-500">{t('rank.among', { n: overall.n })}</p>
 
       <div
@@ -563,11 +567,11 @@ function SectionCharts({ result, insights }: { result: VptResult; insights: Insi
     }`
 
   return (
-    <section>
-      <h3 className="text-lg font-semibold tracking-tight">{t('sec.title')}</h3>
+    <section className={SECTION_CARD}>
+      <h3 className={SECTION_TITLE}>{t('sec.title')}</h3>
       <p className="mt-0.5 text-xs text-stone-500">{t('sec.legend')}</p>
       {canSwitch && (
-        <div role="group" aria-label={t('sec.pool.label')} className="mt-3 flex gap-1 rounded-xl bg-stone-200/70 p-1">
+        <div role="group" aria-label={t('sec.pool.label')} className="mt-3 flex gap-1 rounded-xl bg-stone-200 p-1">
           <button type="button" aria-pressed={pool === 'all'} className={segment(pool === 'all')} onClick={() => setPool('all')}>
             {t('sec.pool.all')}
           </button>
@@ -610,7 +614,7 @@ function SectionCharts({ result, insights }: { result: VptResult; insights: Insi
               <p className="mt-1.5 text-xs font-medium text-stone-500">
                 {pct !== undefined && <span className="font-semibold text-accent">{t('ins.pct', { p: topPercent(pct) })}</span>}
                 {pct !== undefined && median !== undefined && ' · '}
-                {median !== undefined && t('sec.median', { median })}
+                {median !== undefined && <span className="font-bold text-stone-800">{t('sec.median', { median })}</span>}
               </p>
               {typical && (
                 <p className="mt-0.5 text-xs text-stone-600">
@@ -711,8 +715,8 @@ function OccupationBreakdown({ insights, result }: { insights: Insights; result:
       return next
     })
   return (
-    <section>
-      <h3 className="text-lg font-semibold tracking-tight">{t('occ.title')}</h3>
+    <section className={SECTION_CARD}>
+      <h3 className={SECTION_TITLE}>{t('occ.title')}</h3>
       <p className="mt-0.5 text-xs text-stone-500">{t('occ.sub')}</p>
       <ol className="mt-4 grid gap-2">
         {list.map((o, i) => {
@@ -757,7 +761,7 @@ function OccupationBreakdown({ insights, result }: { insights: Insights; result:
                         <li key={c.key}>
                           <div className="flex items-baseline justify-between gap-3 text-sm">
                             <span className="font-medium">{t(`cat.${c.key}` as Key)}</span>
-                            <span className="shrink-0 tabular-nums text-stone-500">{t('sec.median', { median })}</span>
+                            <span className="shrink-0 font-bold tabular-nums text-stone-800">{t('sec.median', { median })}</span>
                           </div>
                           {typical && (
                             <p className="mt-0.5 text-xs text-stone-600">

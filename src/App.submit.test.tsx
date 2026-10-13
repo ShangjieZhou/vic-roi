@@ -1577,3 +1577,35 @@ describe('share link position', () => {
     expect(share.compareDocumentPosition(screen.getByText('Start over')) & 4).toBe(4)
   })
 })
+
+describe('section cards and titles', () => {
+  it('puts each analysis section on a slightly darker card with a larger title', async () => {
+    await openFull(full)
+    for (const title of ['Where you rank', 'Your ranking', 'Your score breakdown', 'Your score in each section', 'Top occupations']) {
+      const heading = screen.getByText(title)
+      expect(heading.className, title).toContain('text-xl')
+      expect(heading.parentElement!.className, title).toContain('bg-stone-100')
+    }
+  })
+
+  it('keeps the white cards inside the darker ones', async () => {
+    await openFull(full)
+    const ranking = screen.getByText('Your ranking').parentElement!
+    expect(ranking.querySelector('li.bg-white')).not.toBeNull()
+  })
+
+  it('bolds the median score under each section chart', async () => {
+    await openFull(full)
+    const medians = screen.getAllByText(/^Median score: \d+$/, { selector: 'span' })
+    expect(medians.length).toBeGreaterThanOrEqual(7)
+    for (const m of medians) expect(m.className).toContain('font-bold')
+  })
+
+  it('bolds the median score in an opened occupation too', async () => {
+    await openFull(full)
+    const row = screen.getAllByRole('button').find((b) => b.getAttribute('aria-controls') === 'occ-261313')!
+    fireEvent.click(row)
+    const panel = document.getElementById('occ-261313')!
+    for (const m of within(panel).getAllByText(/^Median score: \d+$/)) expect(m.className).toContain('font-bold')
+  })
+})
