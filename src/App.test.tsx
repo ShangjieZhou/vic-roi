@@ -79,7 +79,7 @@ describe('wizard flow', () => {
     type(EARNINGS, '100000')
     expect(screen.queryByText('Not applicable offshore')).toBeNull()
     expect(screen.getByText('of 950')).toBeTruthy()
-    expect(screen.getByText('Submit anonymously and see my insights')).toBeTruthy()
+    expect(screen.getByText('Submit and compare my score against others')).toBeTruthy()
   })
 
   it('offers offshore on the earnings step and drops the earnings points', () => {
@@ -88,9 +88,13 @@ describe('wizard flow', () => {
     pick('You are single, have an Australian partner, or do not meet the requirements above')
     expect(screen.getByText('Step 7 of 7')).toBeTruthy()
     pick('I am offshore')
-    expect(screen.getByText('Not applicable offshore')).toBeTruthy()
-    expect(screen.getByText('of 800')).toBeTruthy()
-    expect(screen.getByText('Submit anonymously and see my insights')).toBeTruthy()
+    // Offshore counts as 0 income points, still out of 950, with the income section kept.
+    expect(screen.getByText('Offshore: counts as 0 income points')).toBeTruthy()
+    expect(screen.getByText('Victorian skilled earnings')).toBeTruthy()
+    expect(screen.queryByText('Not applicable offshore')).toBeNull()
+    expect(screen.getByText('of 950')).toBeTruthy()
+    expect(screen.queryByText('of 800')).toBeNull()
+    expect(screen.getByText('Submit and compare my score against others')).toBeTruthy()
   })
 
   it('puts the offshore option above the earnings field and does not autofocus the field', () => {
@@ -151,9 +155,10 @@ describe('simplified Chinese', () => {
     pick('您单身、配偶是澳大利亚人，或不满足上述要求')
     pick('我在境外')
     expect(screen.getByText('您的维州积分测试（VPT）估算分数')).toBeTruthy()
-    expect(screen.getByText('满分 800')).toBeTruthy()
-    expect(screen.getByText('境外不适用')).toBeTruthy()
-    expect(screen.getByText('匿名提交，查看我的分析')).toBeTruthy()
+    expect(screen.getByText('满分 950')).toBeTruthy()
+    expect(screen.getByText('境外：收入部分按 0 分计算')).toBeTruthy()
+    expect(screen.queryByText('境外不适用')).toBeNull()
+    expect(screen.getByText('提交并与其他候选人对比我的分数')).toBeTruthy()
     expect(screen.getByText('年龄')).toBeTruthy()
     expect(screen.getByText('维州技术工作收入')).toBeTruthy()
   })
@@ -214,7 +219,7 @@ describe('simplified Chinese', () => {
     expect(screen.getByText('博士（PhD）')).toBeTruthy()
   })
 
-  it('invites the candidate to submit, in Chinese', () => {
+  it('offers one short call to action in Chinese', () => {
     localStorage.setItem('vpt-lang', 'zh')
     renderApp()
     type('您的年龄是？', '30')
@@ -224,12 +229,95 @@ describe('simplified Chinese', () => {
     pick('技能等级 1')
     pick('您单身、配偶是澳大利亚人，或不满足上述要求')
     pick('我在境外')
-    expect(screen.getByText('看看您和其他候选人相比如何')).toBeTruthy()
-    expect(screen.getByText('提交后，您将看到：')).toBeTruthy()
-    expect(screen.getByText('您在全部候选人以及同职业候选人中的排名')).toBeTruthy()
-    expect(screen.getByText('每个评分项与平均水平的对比')).toBeTruthy()
-    expect(screen.getByText('填写后，还可以看到您与同职业候选人的对比。')).toBeTruthy()
-    expect(screen.getByText('匿名提交，查看我的分析')).toBeTruthy()
-    expect(screen.getByText(/当您所在群体有 10 位候选人提交后，分析就会显示/)).toBeTruthy()
+    expect(screen.getByText('提交并与其他候选人对比我的分数')).toBeTruthy()
+    expect(screen.getByText('填写后可对比同职业候选人。')).toBeTruthy()
+    expect(screen.getByText('匿名提交，无需姓名、邮箱或账号。')).toBeTruthy()
+    expect(screen.queryByText('提交后，您将看到：')).toBeNull()
+  })
+})
+
+describe('income step', () => {
+  const NOT_ELIGIBLE = 'You are single, have an Australian partner, or do not meet the requirements above'
+  const toIncomeStep = () => {
+    render(<App />)
+    answerUpToPartner()
+    pick(NOT_ELIGIBLE)
+  }
+  const field = () => screen.getByLabelText(EARNINGS) as HTMLInputElement
+  const button = () => screen.getByText('See my score') as HTMLButtonElement
+
+  // The field shows "100,000". A browser pattern check on that text blocks the submit with an error,
+  // so the form must not use one. Test environments do not run browser form validation, so check the markup.
+  it('does not use a browser pattern check that would reject thousands separators', () => {
+    toIncomeStep()
+    fireEvent.change(field(), { target: { value: '100000' } })
+    expect(field().value).toBe('100,000')
+    expect(field().hasAttribute('pattern')).toBe(false)
+    expect(field().closest('form')!.noValidate).toBe(true)
+  })
+
+  it.each([0, 1, 999, 1000, 55555, 100000, 250000, 999999, 1000000])('accepts $%i', (amount) => {
+    toIncomeStep()
+    fireEvent.change(field(), { target: { value: String(amount) } })
+    expect(button().disabled).toBe(false)
+    expect(screen.queryByRole('alert')).toBeNull()
+    fireEvent.click(button())
+    expect(screen.getByText('of 950')).toBeTruthy()
+  })
+
+  it('scores a large income with the earnings points', () => {
+    toIncomeStep()
+    fireEvent.change(field(), { target: { value: '250000' } })
+    fireEvent.click(button())
+    // Age 286, English 100, experience 60, education 50, skill level 50, partner 0, earnings capped at 150.
+    expect(screen.getByText('696')).toBeTruthy()
+    expect(screen.getByText('$250,000 a year')).toBeTruthy()
+  })
+
+  it('rejects an income above one million and says why', () => {
+    toIncomeStep()
+    fireEvent.change(field(), { target: { value: '1000001' } })
+    expect(screen.getByRole('alert').textContent).toBe('Enter a number from $0 to $1,000,000.')
+    expect(button().disabled).toBe(true)
+    fireEvent.submit(field().closest('form')!)
+    expect(screen.queryByText('of 950')).toBeNull()
+  })
+
+  it('does not accept a blank income', () => {
+    toIncomeStep()
+    expect(button().disabled).toBe(true)
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('keeps only digits and stops one digit past the maximum', () => {
+    toIncomeStep()
+    fireEvent.change(field(), { target: { value: '$12,34a56789012' } })
+    expect(field().value.replace(/,/g, '').length).toBe(8)
+  })
+})
+
+describe('age step range message', () => {
+  const age = () => screen.getByLabelText('How old are you?') as HTMLInputElement
+  const set = (value: string) => fireEvent.change(age(), { target: { value } })
+
+  it('does not nag while the first digit is still being typed', () => {
+    render(<App />)
+    set('3')
+    expect(screen.queryByRole('alert')).toBeNull()
+    set('30')
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it.each(['12', '100'])('flags %s as out of range', (value) => {
+    render(<App />)
+    set(value)
+    expect(screen.getByRole('alert').textContent).toBe('Enter a number from 14 to 99.')
+  })
+
+  it('shows the range message in Chinese', () => {
+    localStorage.setItem('vpt-lang', 'zh')
+    renderApp()
+    fireEvent.change(screen.getByLabelText('您的年龄是？'), { target: { value: '100' } })
+    expect(screen.getByRole('alert').textContent).toBe('请输入 14 至 99 之间的数字。')
   })
 })

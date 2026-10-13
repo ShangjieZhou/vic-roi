@@ -22,7 +22,7 @@ describe('Results', () => {
     expect(html).toContain('Do you qualify for partner skill points?')
     expect(html).toContain('SkillSelect EOI')
     expect(html).toContain('You are single, have an Australian partner, or do not meet the requirements above')
-    expect(html).not.toContain('Submit anonymously and see my insights')
+    expect(html).not.toContain('Submit and compare my score against others')
   })
 
   it('asks only about the one skipped answer', () => {
@@ -35,48 +35,54 @@ describe('Results', () => {
   it('offers submit once every answer is known', () => {
     const html = render({ ...draft, skillLevel: 1, partnerQualifies: false })
     expect(html).toContain('>546<')
-    expect(html).toContain('Submit anonymously and see my insights')
+    expect(html).toContain('Submit and compare my score against others')
     expect(html).not.toContain('Your score is a range')
   })
 
-  it('marks Victorian earnings not applicable offshore and caps the maximum at 800', () => {
+  it('scores an offshore candidate 0 income points out of 950 and keeps the income section', () => {
     const html = render({ ...draft, location: 'offshore', skillLevel: 1, partnerQualifies: true })
-    expect(html).toContain('Not applicable offshore')
-    expect(html).toContain('of 800')
-    expect(html).toContain('Offshore: Victorian earnings points do not apply')
+    expect(html).toContain('of 950')
+    expect(html).not.toContain('of 800')
+    expect(html).toContain('Victorian skilled earnings')
+    expect(html).toContain('Offshore: counts as 0 income points')
+    expect(html).not.toContain('Not applicable offshore')
   })
 
-  it('invites the candidate to submit and spells out what they will unlock', () => {
-    const html = render({ ...draft, skillLevel: 1, partnerQualifies: false })
-    expect(html).toContain('See how you compare')
-    expect(html).toContain('Once you submit, you will see:')
-    expect(html).toContain('Your rank among all candidates, and within your occupation')
-    expect(html).toContain('Where your score sits across the whole pool')
-    expect(html).toContain('How each category compares with the average candidate')
-    expect(html).toContain('The quickest ways to add points')
-    expect(html).toContain('Submit anonymously and see my insights')
+  it('gives an offshore candidate the same total as an onshore one with no income', () => {
+    const offshore = render({ ...draft, location: 'offshore', skillLevel: 1, partnerQualifies: true, annualEarnings: 200_000 })
+    const onshore = render({ ...draft, location: 'onshore', skillLevel: 1, partnerQualifies: true, annualEarnings: 0 })
+    // Age 286, English 100, experience 60, education 50, skill level 50, partner 50, income 0.
+    expect(offshore).toContain('>596<')
+    expect(onshore).toContain('>596<')
   })
 
-  it('explains why adding an occupation helps', () => {
+  it('offers one short call to action instead of a long explanation', () => {
     const html = render({ ...draft, skillLevel: 1, partnerQualifies: false })
-    expect(html).toContain('Add it to also see how you compare with candidates in the same occupation.')
+    expect(html).toContain('Submit and compare my score against others')
+    // The earlier version explained the benefits at length. None of that text remains.
+    for (const gone of [
+      'See how you compare',
+      'Once you submit, you will see:',
+      'Your rank among all candidates, and within your occupation',
+      'It is completely anonymous',
+      'Insights appear once',
+    ]) {
+      expect(html, gone).not.toContain(gone)
+    }
   })
 
-  it('keeps the anonymity assurance beside the button', () => {
+  it('keeps a single short line saying the submission is anonymous', () => {
     const html = render({ ...draft, skillLevel: 1, partnerQualifies: false })
-    expect(html).toContain('Anonymous')
-    expect(html).toContain('It is completely anonymous: no name, no email, no account.')
-    expect(html.indexOf('completely anonymous')).toBeLessThan(html.indexOf('Submit anonymously and see my insights'))
+    expect(html).toContain('Anonymous. No name, email or account needed.')
   })
 
-  it('sets honest expectations about the 10-candidate minimum', () => {
+  it('says briefly why adding an occupation helps', () => {
     const html = render({ ...draft, skillLevel: 1, partnerQualifies: false })
-    expect(html).toContain('Insights appear once 10 candidates in your group have submitted.')
-    expect(html).toContain('your result is saved and you can check back any time')
+    expect(html).toContain('Adds a comparison within your occupation.')
   })
 
   it('does not show the invitation to someone with an unresolved range', () => {
     const html = render(draft)
-    expect(html).not.toContain('Once you submit, you will see:')
+    expect(html).not.toContain('Submit and compare my score against others')
   })
 })

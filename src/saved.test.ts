@@ -7,6 +7,7 @@ const entry = (n: number, over: Partial<HistoryEntry> = {}): HistoryEntry => ({
   total: 500 + n,
   location: 'onshore',
   occupation: null,
+  occupationCode: null,
   savedAt: 1_700_000_000_000 + n * 1000,
   ...over,
 })
@@ -60,11 +61,24 @@ describe('submission history', () => {
   })
 
   it('migrates the single result stored by the previous version', () => {
-    const { occupation: _omit, ...legacy } = entry(7)
+    const { occupation: _omit, occupationCode: _omitCode, ...legacy } = entry(7)
     localStorage.setItem('vpt-submission', JSON.stringify(legacy))
-    expect(loadHistory()).toEqual([{ ...legacy, occupation: null }])
+    expect(loadHistory()).toEqual([{ ...legacy, occupation: null, occupationCode: null }])
     expect(localStorage.getItem('vpt-submission')).toBeNull()
     expect(JSON.parse(localStorage.getItem('vpt-history')!)).toHaveLength(1)
+  })
+
+  it('keeps a listed occupation code and rejects a malformed one', () => {
+    addToHistory(entry(1, { occupation: 'Software engineer', occupationCode: '261313' }))
+    expect(loadHistory()[0]).toMatchObject({ occupation: 'Software engineer', occupationCode: '261313' })
+    localStorage.setItem('vpt-history', JSON.stringify([{ ...entry(2), occupationCode: '26-13' }, entry(3)]))
+    expect(loadHistory().map((e) => e.total)).toEqual([503])
+  })
+
+  it('reads entries saved before occupation codes existed', () => {
+    const { occupationCode: _omit, ...older } = entry(4, { occupation: 'Nurse' })
+    localStorage.setItem('vpt-history', JSON.stringify([older]))
+    expect(loadHistory()).toEqual([{ ...older, occupationCode: null }])
   })
 
   it('ignores a corrupt legacy value', () => {

@@ -1,5 +1,4 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import type { Msg as Descriptor } from '../../supabase/functions/_shared/insights'
 import { en, type Key, type Msg, type Params } from './en'
 import { zh } from './zh'
 
@@ -28,15 +27,12 @@ interface I18n {
   lang: Lang
   setLang: (lang: Lang) => void
   t: (key: Key, params?: Params) => string
-  // Translates an id + params produced by the shared insights module.
-  td: (message: Descriptor) => string
 }
 
 const defaultValue: I18n = {
   lang: 'en',
   setLang: () => {},
   t: (key, params) => translate('en', key, params),
-  td: (message) => translate('en', message.id as Key, message.params),
 }
 
 const Context = createContext<I18n>(defaultValue)
@@ -63,7 +59,6 @@ export function LangProvider({ children }: { children: ReactNode }) {
       lang,
       setLang,
       t: (key, params) => translate(lang, key, params),
-      td: (message) => translate(lang, message.id as Key, message.params),
     }),
     [lang, setLang],
   )

@@ -5,10 +5,10 @@ import type {
   SkillLevel,
   VptDraft,
 } from '../supabase/functions/_shared/scoring'
+import { EARNINGS_INPUT_MAX } from '../supabase/functions/_shared/scoring'
 import { loadSubmission, type Submission } from './api'
 import { money } from './format'
 import { HistoryList } from './History'
-import { LockIcon } from './icons'
 import { useI18n, type Key, type Lang } from './i18n'
 import { PartnerRequirements } from './PartnerRequirements'
 import { Results } from './Results'
@@ -128,6 +128,7 @@ export function App() {
         total: s.insights.total,
         location: s.insights.location,
         occupation: s.occupation,
+        occupationCode: s.occupationCode,
         savedAt: Date.now(),
       }),
     )
@@ -179,27 +180,6 @@ export function App() {
           </>
         ) : (
           <>
-            {step === 0 && (
-              <>
-                <p className="mb-6 flex items-start gap-1.5 text-sm text-stone-500">
-                  <LockIcon className="mt-0.5 size-4 text-emerald-700" />
-                  <span>{t('home.privacy')}</span>
-                </p>
-                {history.length > 0 && (
-                  <HistoryList
-                    entries={history}
-                    onOpen={(id) => {
-                      go(`/r/${id}`)
-                      showResult(id)
-                    }}
-                    onClear={() => {
-                      clearHistory()
-                      setHistory([])
-                    }}
-                  />
-                )}
-              </>
-            )}
             <Question
               key={STEPS[step]}
               step={STEPS[step]}
@@ -209,6 +189,19 @@ export function App() {
               onAnswer={answer}
               onBack={step > 0 ? () => setStep(step - 1) : undefined}
             />
+            {step === 0 && history.length > 0 && (
+              <HistoryList
+                entries={history}
+                onOpen={(id) => {
+                  go(`/r/${id}`)
+                  showResult(id)
+                }}
+                onClear={() => {
+                  clearHistory()
+                  setHistory([])
+                }}
+              />
+            )}
           </>
         )}
       </div>
@@ -325,7 +318,7 @@ function Question(props: {
         <NumberStep
           title={t('q.earn.title')}
           hint={t('q.earn.hint')}
-          min={0} max={10_000_000} initial={answers.annualEarnings} prefix="$" required
+          min={0} max={EARNINGS_INPUT_MAX} initial={answers.annualEarnings} prefix="$" required
           // The offshore option sits above the field. Skipping autofocus keeps the keyboard from hiding it.
           autoFocus={false}
           onSubmit={(annualEarnings) => onAnswer({ annualEarnings, location: 'onshore' })}
@@ -404,9 +397,18 @@ function NumberStep(props: {
   const [text, setText] = useState(props.initial !== undefined ? String(props.initial) : '')
   const value = text === '' ? (props.required ? NaN : 0) : Number(text)
   const valid = Number.isInteger(value) && value >= props.min && value <= props.max
+  const fmt = (n: number) => (props.prefix === '$' ? `$${money.format(n)}` : String(n))
+  // Explain a number that is out of range. A number that is still too short, such as the first digit of an age,
+  // is not flagged until the field has as many digits as the largest allowed value.
+  const outOfRange =
+    Number.isFinite(value) &&
+    (value > props.max || (value < props.min && text.length >= String(props.max).length))
 
   return (
     <form
+      // The field shows thousands separators ("100,000"). Browser pattern checks would reject that on submit,
+      // so the form validates the number itself.
+      noValidate
       onSubmit={(e) => {
         e.preventDefault()
         if (valid) props.onSubmit(value)
@@ -428,17 +430,21 @@ function NumberStep(props: {
           autoFocus={props.autoFocus ?? true}
           type="text"
           inputMode="numeric"
-          pattern="[0-9]*"
           enterKeyHint={props.submitLabel ? 'done' : 'next'}
           autoComplete="off"
           value={props.prefix === '$' && text !== '' ? money.format(Number(text)) : text}
-          onChange={(e) => setText(e.target.value.replace(/\D/g, '').slice(0, 9))}
+          onChange={(e) => setText(e.target.value.replace(/\D/g, '').slice(0, String(props.max).length + 1))}
           className="min-h-8 w-full bg-transparent text-2xl outline-none"
           aria-label={props.title}
         />
         {props.suffix && <span className="text-stone-400">{props.suffix}</span>}
       </div>
       <p className="mt-3 text-sm text-stone-500">{props.hint}</p>
+      {outOfRange && (
+        <p role="alert" className="mt-2 text-sm text-amber-700">
+          {t('q.range', { min: fmt(props.min), max: fmt(props.max) })}
+        </p>
+      )}
       <button
         type="submit"
         disabled={!valid}

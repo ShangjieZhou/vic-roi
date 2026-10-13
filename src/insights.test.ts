@@ -1,17 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
-  assess,
-  improvementLevers,
+  comparisonRows,
+  isRanked,
   normalizeOccupation,
   type Insights,
 } from '../supabase/functions/_shared/insights'
-import type { VptInput } from '../supabase/functions/_shared/scoring'
-import { translate, type Key } from './i18n'
-
-const input: VptInput = {
-  location: 'onshore', age: 30, english: 'competent', experienceYears: 3, education: 'bachelors',
-  skillLevel: 1, partnerQualifies: false, annualEarnings: 0,
-}
 
 describe('normalizeOccupation', () => {
   it('treats empty as none', () => {
@@ -32,64 +25,65 @@ describe('normalizeOccupation', () => {
   })
 })
 
-describe('assess', () => {
-  const ranked = (percentile: number): Insights => ({
-    total: 500,
-    location: 'onshore',
-    overall: { n: 50, percentile, median: 480 },
-    occupation: null,
+describe('isRanked', () => {
+  it('is true once a percentile and median are present', () => {
+    expect(isRanked({ n: 12, percentile: 40, median: 500 })).toBe(true)
   })
-
-  it('reports too little data below the minimum pool', () => {
-    const a = assess({ total: 500, location: 'onshore', overall: { n: 3 }, occupation: null })
-    expect(a.label.id).toBe('assess.label.none')
-    expect(a.lines[0]).toEqual({ id: 'assess.waiting', params: { n: 3, min: 10 } })
-  })
-  it.each([
-    [95, 'veryStrong'], [90, 'veryStrong'], [75, 'strong'], [50, 'mid'], [20, 'below'], [5, 'low'],
-  ])('percentile %i -> %s', (p, label) => expect(assess(ranked(p)).label.id).toBe(`assess.label.${label}`))
-
-  it('describes the overall ranking with the location', () => {
-    expect(assess(ranked(60)).lines[0]).toEqual({
-      id: 'assess.lineOverall',
-      params: { p: 60, n: 50, loc: 'onshore', median: 480 },
-    })
-  })
-
-  it('adds an occupation line when ranked and a waiting line when not', () => {
-    const withOcc = assess({ ...ranked(60), occupation: { name: 'Nurse', n: 12, percentile: 80, median: 500 } })
-    expect(withOcc.lines[1]).toEqual({ id: 'assess.lineOcc', params: { name: 'Nurse', p: 80, n: 12 } })
-    const waiting = assess({ ...ranked(60), occupation: { name: 'Nurse', n: 2 } })
-    expect(waiting.lines[1]).toEqual({ id: 'assess.lineOccWaiting', params: { name: 'Nurse', n: 2, min: 5 } })
+  it('is false for a group too small to rank, and for nothing', () => {
+    expect(isRanked({ n: 3 })).toBe(false)
+    expect(isRanked(null)).toBe(false)
+    expect(isRanked(undefined)).toBe(false)
   })
 })
 
-describe('improvementLevers', () => {
-  it('ranks the largest gains first and limits to three', () => {
-    const levers = improvementLevers(input)
-    expect(levers).toHaveLength(3)
-    expect(levers[0]).toMatchObject({ label: { id: 'lever.english.proficient' }, gain: 100 })
-    expect(levers[1].gain).toBe(50)
-    expect(levers.map((l) => l.gain)).toEqual([...levers.map((l) => l.gain)].sort((a, b) => b - a))
+describe('comparisonRows', () => {
+  const base: Insights = {
+    total: 500,
+    location: 'onshore',
+    overall: { n: 23, percentile: 54, median: 500 },
+    locationGroup: { n: 15, percentile: 60, median: 500 },
+    occupation: { name: 'Software engineer', code: '261313', n: 9, percentile: 93, median: 450 },
+  }
+
+  it('shows the percentile in exactly three contexts: all candidates, occupation and location', () => {
+    expect(comparisonRows(base)).toEqual([
+      { kind: 'all', n: 23, percentile: 54 },
+      { kind: 'occupation', n: 9, percentile: 93 },
+      { kind: 'location', n: 15, percentile: 60 },
+    ])
   })
-  it('offers nothing when maxed out', () => {
-    const maxed: VptInput = {
-      location: 'onshore', age: 25, english: 'superior', experienceYears: 10, education: 'phd',
-      skillLevel: 1, partnerQualifies: true, annualEarnings: 200_000,
-    }
-    expect(improvementLevers(maxed)).toEqual([])
+
+  it('shows a narrower group with as few as two candidates', () => {
+    const rows = comparisonRows({
+      ...base,
+      locationGroup: { n: 2, percentile: 75, median: 500 },
+      occupation: { name: 'Software engineer', code: '261313', n: 2, percentile: 75, median: 500 },
+    })
+    expect(rows.find((r) => r.kind === 'occupation')).toEqual({ kind: 'occupation', n: 2, percentile: 75 })
+    expect(rows.find((r) => r.kind === 'location')).toEqual({ kind: 'location', n: 2, percentile: 75 })
   })
-  it('never suggests Victorian earnings to offshore candidates', () => {
-    const levers = improvementLevers({ ...input, location: 'offshore', english: 'superior', education: 'phd', experienceYears: 9, partnerQualifies: true }, 5)
-    expect(levers).toEqual([])
+
+  it('keeps an occupation the candidate is alone in, without a rank', () => {
+    const rows = comparisonRows({ ...base, occupation: { name: 'Software engineer', code: '261313', n: 1 } })
+    expect(rows.find((r) => r.kind === 'occupation')).toEqual({ kind: 'occupation', n: 1, percentile: undefined })
   })
-  it('names both PTE and IELTS for English levers', () => {
-    expect(translate('en', improvementLevers(input)[0].label.id as Key)).toBe('Reach Proficient English (PTE 65 or IELTS 7)')
-    expect(translate('zh', improvementLevers(input)[0].label.id as Key)).toBe('达到熟练英语（PTE 65 或雅思 7）')
+
+  it('leaves out the location row when every candidate is in the same location', () => {
+    const rows = comparisonRows({ ...base, locationGroup: { n: 23, percentile: 54, median: 500 } })
+    expect(rows.map((r) => r.kind)).toEqual(['all', 'occupation'])
   })
-  it('targets the $80,000 threshold for low earners', () => {
-    const levers = improvementLevers({ ...input, english: 'superior', education: 'phd', experienceYears: 9, partnerQualifies: true }, 5)
-    expect(levers[0].label).toEqual({ id: 'lever.earn', params: { amount: '80,000' } })
-    expect(levers[0].gain).toBe(8)
+
+  it('has no occupation row when none was given', () => {
+    expect(comparisonRows({ ...base, occupation: null }).map((r) => r.kind)).toEqual(['all', 'location'])
+  })
+
+  it('has no overall row until enough candidates have submitted', () => {
+    expect(comparisonRows({ ...base, overall: { n: 6 } }).map((r) => r.kind)).toEqual(['occupation', 'location'])
+  })
+
+  it('copes with a server that sends no location group or occupation', () => {
+    expect(comparisonRows({ total: 1, location: 'onshore', overall: { n: 23, percentile: 50, median: 500 }, occupation: null })).toEqual([
+      { kind: 'all', n: 23, percentile: 50 },
+    ])
   })
 })

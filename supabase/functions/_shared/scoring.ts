@@ -39,20 +39,12 @@ export interface CategoryScore {
   label: string
   points: number
   max: number
-  // False when the category cannot be claimed (for example Victorian earnings offshore).
-  applicable: boolean
 }
 
 export interface VptResult {
   total: number
   max: number
   categories: CategoryScore[]
-}
-
-// Single place that decides which categories count for each location.
-export function isApplicable(key: CategoryKey, location: Location): boolean {
-  if (key === 'earnings') return location === 'onshore'
-  return true
 }
 
 const AGE_POINTS: Record<number, number> = {
@@ -100,6 +92,8 @@ export function partnerPoints(qualifies: boolean): number {
   return qualifies ? 50 : 0
 }
 
+// The largest income the form accepts. The score itself caps out at 170,000.
+export const EARNINGS_INPUT_MAX = 1_000_000
 export const EARNINGS_MIN = 80_000
 export const EARNINGS_CAP = 170_000
 
@@ -117,24 +111,26 @@ export function earningsPoints(earnings: number): number {
   return EARNINGS_BAND_POINTS[band]
 }
 
+// Every candidate is scored out of 950. Victorian earnings only count for someone working in Victoria, so an
+// offshore candidate gets 0 points for that section rather than the section being left out.
 export function calculateVpt(input: VptInput): VptResult {
-  const rows: Omit<CategoryScore, 'applicable'>[] = [
+  const categories: CategoryScore[] = [
     { key: 'age', label: 'Age', points: agePoints(input.age), max: 300 },
     { key: 'english', label: 'English language', points: ENGLISH_POINTS[input.english], max: 200 },
     { key: 'experience', label: 'Experience in nominated occupation', points: experiencePoints(input.experienceYears), max: 100 },
     { key: 'education', label: 'Education', points: EDUCATION_POINTS[input.education], max: 100 },
     { key: 'skillLevel', label: 'Occupation skill level', points: skillLevelPoints(input.skillLevel), max: 50 },
     { key: 'partner', label: "Partner's skill", points: partnerPoints(input.partnerQualifies), max: 50 },
-    { key: 'earnings', label: 'Victorian skilled earnings', points: earningsPoints(input.annualEarnings), max: 150 },
+    {
+      key: 'earnings',
+      label: 'Victorian skilled earnings',
+      points: input.location === 'offshore' ? 0 : earningsPoints(input.annualEarnings),
+      max: 150,
+    },
   ]
-  const categories: CategoryScore[] = rows.map((row) => {
-    const applicable = isApplicable(row.key, input.location)
-    return { ...row, points: applicable ? row.points : 0, applicable }
-  })
-  const counted = categories.filter((c) => c.applicable)
   return {
-    total: counted.reduce((sum, c) => sum + c.points, 0),
-    max: counted.reduce((sum, c) => sum + c.max, 0),
+    total: categories.reduce((sum, c) => sum + c.points, 0),
+    max: categories.reduce((sum, c) => sum + c.max, 0),
     categories,
   }
 }

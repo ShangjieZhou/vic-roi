@@ -1,6 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { assess, improvementLevers, type Insights } from '../supabase/functions/_shared/insights'
-import type { EducationLevel, EnglishLevel, VptInput } from '../supabase/functions/_shared/scoring'
 import { en, ordinal } from './i18n/en'
 import { zh } from './i18n/zh'
 import { translate, type Key } from './i18n'
@@ -43,37 +41,8 @@ describe('translations', () => {
     expect(translate('zh', 'partner.req1')).toContain('SkillSelect')
     expect(translate('zh', 'opt.english.superior.hint')).toContain('PTE 79')
     expect(translate('zh', 'opt.english.superior.hint')).toContain('雅思 8')
-    expect(translate('zh', 'q.earn.offshore.hint')).toContain('800')
-  })
-
-  it('cover every message the shared insights module can emit', () => {
-    const ids = new Set<string>()
-    const add = (m: { id: string }) => ids.add(m.id)
-
-    const stats = { n: 50, percentile: 50, median: 500 }
-    for (const percentile of [95, 75, 50, 20, 5]) {
-      for (const occupation of [null, { name: 'X', n: 9, percentile: 50, median: 500 }, { name: 'X', n: 2 }]) {
-        const a = assess({ total: 500, location: 'onshore', overall: { ...stats, percentile }, occupation } as Insights)
-        add(a.label)
-        a.lines.forEach(add)
-      }
-    }
-    const waiting = assess({ total: 1, location: 'offshore', overall: { n: 1 }, occupation: null })
-    add(waiting.label)
-    waiting.lines.forEach(add)
-
-    const english: EnglishLevel[] = ['competent', 'proficient']
-    const education: EducationLevel[] = ['other', 'bachelors', 'masters']
-    for (const e of english) for (const d of education) for (const experienceYears of [0, 1, 2, 4, 6]) for (const annualEarnings of [0, 100_000]) {
-      const input: VptInput = { location: 'onshore', age: 30, english: e, education: d, experienceYears, skillLevel: 1, partnerQualifies: false, annualEarnings }
-      improvementLevers(input, 10).forEach((l) => add(l.label))
-    }
-
-    expect(ids.size).toBeGreaterThan(15)
-    for (const id of ids) {
-      expect(id in en, `en missing ${id}`).toBe(true)
-      expect(id in zh, `zh missing ${id}`).toBe(true)
-    }
+    expect(translate('zh', 'q.earn.offshore.hint')).toContain('0 分')
+    expect(translate('en', 'q.earn.offshore.hint')).toContain('0 income points')
   })
 })
 

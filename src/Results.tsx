@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import {
-  assess,
-  improvementLevers,
+  comparisonRows,
   isRanked,
   MIN_OVERALL,
+  type ComparisonRow,
   type Insights,
-  type Tone,
+  type PoolStats,
 } from '../supabase/functions/_shared/insights'
 import {
   calculateRange,
@@ -17,18 +17,13 @@ import {
   type VptInput,
   type VptResult,
 } from '../supabase/functions/_shared/scoring'
-import { submitScore, suggestOccupations, type Submission } from './api'
+import { submitScore, type OccupationChoice, type Submission } from './api'
 import { money } from './format'
-import { CheckIcon, LockIcon } from './icons'
+import { LockIcon } from './icons'
 import { useI18n, type Key } from './i18n'
+import { OccupationPicker } from './OccupationPicker'
+import { occupationDisplayName } from './occupationSearch'
 import { PartnerRequirements } from './PartnerRequirements'
-
-const TONE: Record<Tone, string> = {
-  green: 'bg-emerald-50 text-emerald-900',
-  indigo: 'bg-indigo-50 text-indigo-900',
-  amber: 'bg-amber-50 text-amber-900',
-  stone: 'bg-stone-100 text-stone-700',
-}
 
 export function Results(props: {
   draft: VptDraft
@@ -42,8 +37,14 @@ export function Results(props: {
   const { draft } = props
   const { low, high, exact } = calculateRange(draft)
   const resolved = resolveDraft(draft)
+  // Once the comparison is open, the per-section bar charts take over from the simple score bars.
+  const analysisOpen = !!(props.submission && resolved && isRanked(props.submission.insights.overall))
   const earningsNote =
-    draft.annualEarnings > 0 ? t('res.perYear', { amount: money.format(draft.annualEarnings) }) : t('res.notClaimed')
+    draft.location === 'offshore'
+      ? t('res.offshoreZero')
+      : draft.annualEarnings > 0
+        ? t('res.perYear', { amount: money.format(draft.annualEarnings) })
+        : t('res.notClaimed')
 
   return (
     <section>
@@ -54,46 +55,38 @@ export function Results(props: {
         </span>
         <span className="text-lg text-stone-400">{t('res.of', { max: high.max })}</span>
       </p>
-      {draft.location === 'offshore' && <p className="mt-1 text-xs text-stone-400">{t('res.offshore')}</p>}
 
-      <ul className="mt-10 grid gap-5">
-        {low.categories.map((c, i) => {
-          const top = high.categories[i].points
-          const label = t(`cat.${c.key}` as Key)
-          if (!c.applicable) {
+      {!analysisOpen && (
+        <ul className="mt-10 grid gap-5">
+          {low.categories.map((c, i) => {
+            const top = high.categories[i].points
             return (
-              <li key={c.key} className="flex items-baseline justify-between text-sm text-stone-400">
-                <span>{label}</span>
-                <span>{t('res.notApplicable')}</span>
+              <li key={c.key}>
+                <div className="flex items-baseline justify-between text-sm">
+                  <span className="font-medium">{t(`cat.${c.key}` as Key)}</span>
+                  <span className="tabular-nums text-stone-500">
+                    {c.points === top ? c.points : t('res.to', { a: c.points, b: top })}{' '}
+                    <span className="text-stone-300">/ {c.max}</span>
+                  </span>
+                </div>
+                <div className="relative mt-2 h-2 overflow-hidden rounded-full bg-stone-200">
+                  {top > c.points && (
+                    <div
+                      className="absolute inset-y-0 left-0 rounded-full bg-indigo-200"
+                      style={{ width: `${(top / c.max) * 100}%` }}
+                    />
+                  )}
+                  <div
+                    className="absolute inset-y-0 left-0 rounded-full bg-accent transition-all duration-500"
+                    style={{ width: `${(c.points / c.max) * 100}%` }}
+                  />
+                </div>
+                {c.key === 'earnings' && <p className="mt-1 text-xs text-stone-400">{earningsNote}</p>}
               </li>
             )
-          }
-          return (
-            <li key={c.key}>
-              <div className="flex items-baseline justify-between text-sm">
-                <span className="font-medium">{label}</span>
-                <span className="tabular-nums text-stone-500">
-                  {c.points === top ? c.points : t('res.to', { a: c.points, b: top })}{' '}
-                  <span className="text-stone-300">/ {c.max}</span>
-                </span>
-              </div>
-              <div className="relative mt-2 h-2 overflow-hidden rounded-full bg-stone-200">
-                {top > c.points && (
-                  <div
-                    className="absolute inset-y-0 left-0 rounded-full bg-indigo-200"
-                    style={{ width: `${(top / c.max) * 100}%` }}
-                  />
-                )}
-                <div
-                  className="absolute inset-y-0 left-0 rounded-full bg-accent transition-all duration-500"
-                  style={{ width: `${(c.points / c.max) * 100}%` }}
-                />
-              </div>
-              {c.key === 'earnings' && <p className="mt-1 text-xs text-stone-400">{earningsNote}</p>}
-            </li>
-          )
-        })}
-      </ul>
+          })}
+        </ul>
+      )}
 
       {props.submission && resolved ? (
         <InsightsPanel
@@ -173,29 +166,14 @@ function RefineButton(props: { onClick: () => void; children: React.ReactNode })
 
 type Notice = { key: Key; params?: Record<string, string | number> }
 
-const BENEFITS: Key[] = ['submit.benefit1', 'submit.benefit2', 'submit.benefit3', 'submit.benefit4']
-
 function SubmitCard(props: { input: VptInput; onSubmitted: (s: Submission) => void }) {
   const { t } = useI18n()
-  const [occupation, setOccupation] = useState('')
-  const [suggestions, setSuggestions] = useState<{ name: string; count: number }[]>([])
+  const [occupation, setOccupation] = useState<OccupationChoice | null>(null)
   // Stored as a key so the message follows the language toggle.
   const [notice, setNotice] = useState<Notice | null>(null)
   const [busy, setBusy] = useState(false)
-  const picked = useRef(false)
-
-  useEffect(() => {
-    if (picked.current) {
-      picked.current = false
-      return
-    }
-    if (occupation.trim().length < 2) {
-      setSuggestions([])
-      return
-    }
-    const timer = setTimeout(() => suggestOccupations(occupation).then(setSuggestions), 250)
-    return () => clearTimeout(timer)
-  }, [occupation])
+  // Once the device has used all its submissions, trying again can only fail.
+  const [blocked, setBlocked] = useState(false)
 
   const submit = async () => {
     setBusy(true)
@@ -203,8 +181,9 @@ function SubmitCard(props: { input: VptInput; onSubmitted: (s: Submission) => vo
     const outcome = await submitScore(props.input, occupation)
     setBusy(false)
     if (outcome.status === 'ok') return props.onSubmitted(outcome.submission)
-    if (outcome.status === 'rate_limited') {
-      setNotice({ key: 'submit.rate', params: { minutes: Math.max(1, Math.ceil(outcome.retryAfter / 60)) } })
+    if (outcome.status === 'device_limit') {
+      setBlocked(true)
+      setNotice({ key: 'submit.deviceLimit', params: { limit: outcome.limit } })
     } else if (outcome.status === 'invalid_occupation') {
       setNotice({ key: 'submit.invalidOcc' })
     } else {
@@ -214,80 +193,27 @@ function SubmitCard(props: { input: VptInput; onSubmitted: (s: Submission) => vo
 
   return (
     <div className="mt-10 rounded-2xl border border-stone-200 bg-white p-5">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <h3 className="text-lg font-semibold tracking-tight">{t('submit.title')}</h3>
-        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800">
-          <LockIcon className="size-3" />
-          {t('anon.badge')}
-        </span>
-      </div>
-      <p className="mt-2 text-sm leading-relaxed text-stone-600">{t('submit.body')}</p>
-
-      <div className="mt-4 rounded-xl bg-indigo-50 p-4">
-        <p className="text-sm font-medium text-indigo-950">{t('submit.benefitsTitle')}</p>
-        <ul className="mt-2 grid gap-2">
-          {BENEFITS.map((key) => (
-            <li key={key} className="flex items-start gap-2 text-sm leading-snug text-indigo-950">
-              <CheckIcon className="mt-0.5 size-4 text-accent" />
-              <span>{t(key)}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <label className="mt-5 block text-sm font-medium" htmlFor="occupation">
+      <p className="text-sm font-medium">
         {t('submit.occLabel')} <span className="font-normal text-stone-400">{t('submit.optional')}</span>
-      </label>
+      </p>
       <p className="mt-0.5 text-xs text-stone-500">{t('submit.occHint')}</p>
-      <input
-        id="occupation"
-        type="text"
-        value={occupation}
-        maxLength={80}
-        autoComplete="off"
-        autoCapitalize="words"
-        enterKeyHint="done"
-        placeholder={t('submit.placeholder')}
-        onChange={(e) => setOccupation(e.target.value)}
-        className="mt-2 min-h-12 w-full rounded-xl border border-stone-200 bg-white px-4 text-base outline-none focus:border-accent"
-      />
-      {suggestions.length > 0 && (
-        <ul className="mt-2 grid gap-1">
-          {suggestions.map((s) => (
-            <li key={s.name}>
-              <button
-                onClick={() => {
-                  picked.current = true
-                  setOccupation(s.name)
-                  setSuggestions([])
-                }}
-                className="flex min-h-11 w-full items-center justify-between rounded-lg px-3 text-left text-sm active:bg-stone-100"
-              >
-                <span>{s.name}</span>
-                <span className="text-xs text-stone-400">{t('submit.suggestCount', { n: s.count })}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      <OccupationPicker value={occupation} onChange={setOccupation} />
 
       {notice && (
         <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">{t(notice.key, notice.params)}</p>
       )}
 
-      <p className="mt-5 flex items-start gap-1.5 text-xs leading-relaxed text-stone-500">
-        <LockIcon className="mt-0.5 size-3.5 text-emerald-700" />
-        <span>{t('submit.anonDetail')}</span>
-      </p>
-
       <button
         onClick={submit}
-        disabled={busy}
-        className="mt-5 min-h-14 w-full rounded-xl bg-accent px-5 py-3 text-base font-medium text-white transition enabled:hover:opacity-90 enabled:active:opacity-80 disabled:opacity-60"
+        disabled={busy || blocked}
+        className="mt-5 min-h-14 w-full rounded-xl bg-accent px-5 py-3 text-base font-semibold text-white transition enabled:hover:opacity-90 enabled:active:opacity-80 disabled:opacity-60"
       >
         {busy ? t('submit.busy') : t('submit.cta')}
       </button>
-      <p className="mt-3 text-center text-xs leading-relaxed text-stone-400">{t('submit.note', { min: MIN_OVERALL })}</p>
+      <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-stone-500">
+        <LockIcon className="size-3.5 text-emerald-700" />
+        <span>{t('submit.anon')}</span>
+      </p>
     </div>
   )
 }
@@ -298,61 +224,20 @@ function InsightsPanel(props: {
   submission: Submission
   onRefresh: () => Promise<void>
 }) {
-  const { t, td } = useI18n()
+  const { t } = useI18n()
   const { insights } = props.submission
-  const assessment = assess(insights)
-  const levers = improvementLevers(props.input)
-  const { overall, occupation } = insights
+  const { overall } = insights
 
   return (
     <div className="mt-10 grid gap-8">
       {isRanked(overall) ? (
-        <div className={`rounded-2xl p-5 ${TONE[assessment.tone]}`}>
-          <p className="text-xs font-medium tracking-wide uppercase opacity-70">
-            {t('ins.heading', { loc: t(`loc.${insights.location}` as Key) })}
-          </p>
-          <p className="mt-1 text-3xl font-semibold tracking-tight">{td(assessment.label)}</p>
-          {assessment.lines.map((line, i) => (
-            <p key={`${line.id}-${i}`} className="mt-2 text-sm leading-relaxed">
-              {td(line)}
-            </p>
-          ))}
-        </div>
+        <>
+          <PercentileBar insights={insights} />
+          <Comparison insights={insights} />
+          <SectionCharts result={props.result} overall={overall} />
+        </>
       ) : (
         <WaitingCard insights={insights} onRefresh={props.onRefresh} />
-      )}
-
-      {isRanked(overall) && (
-        <div className="grid grid-cols-3 gap-3 text-center">
-          <Stat label={t('ins.overall')} value={t('ins.top', { p: Math.max(1, 100 - overall.percentile) })} />
-          <Stat
-            label={t('ins.yourOcc')}
-            value={isRanked(occupation) ? t('ins.top', { p: Math.max(1, 100 - occupation.percentile) }) : t('ins.na')}
-          />
-          <Stat label={t('ins.median')} value={String(overall.median)} />
-        </div>
-      )}
-
-      {isRanked(overall) && overall.histogram && overall.histogram.length > 0 && (
-        <Distribution histogram={overall.histogram} total={insights.total} p25={overall.p25} p75={overall.p75} />
-      )}
-
-      {overall.categoryAvg && (
-        <CategoryCompare result={props.result} avg={overall.categoryAvg} percentile={overall.categoryPercentile} />
-      )}
-
-      {levers.length > 0 && (
-        <div>
-          <h3 className="text-lg font-semibold tracking-tight">{t('ins.leversTitle')}</h3>
-          <ul className="mt-3 grid gap-2">
-            {levers.map((l) => (
-              <li key={l.label.id} className="flex items-center justify-between gap-4 rounded-xl bg-white px-4 py-3 text-sm">
-                <span>{td(l.label)}</span>
-                <span className="shrink-0 font-semibold text-accent">+{l.gain}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
       )}
 
       <ShareLink />
@@ -377,11 +262,7 @@ function WaitingCard(props: { insights: Insights; onRefresh: () => Promise<void>
     <div className="rounded-2xl bg-stone-100 p-5 text-stone-800">
       <p className="text-2xl font-semibold tracking-tight">{t('wait.title')}</p>
       <p className="mt-2 text-sm leading-relaxed">
-        {t('wait.body', {
-          min: MIN_OVERALL,
-          n: props.insights.overall.n,
-          loc: t(`loc.${props.insights.location}` as Key),
-        })}
+        {t('wait.body', { min: MIN_OVERALL, n: props.insights.overall.n })}
       </p>
       <p className="mt-2 text-sm leading-relaxed">{t('wait.stay')}</p>
       <p className="mt-2 flex items-start gap-1.5 text-sm leading-relaxed text-emerald-800">
@@ -401,97 +282,196 @@ function WaitingCard(props: { insights: Insights; onRefresh: () => Promise<void>
   )
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+// The candidate's percentile in three contexts: all candidates, their occupation, and their onshore or offshore
+// status. The occupation and location rows appear as soon as another candidate is in them, so the numbers can rest
+// on very few people. The count is shown beside each one.
+function Comparison({ insights }: { insights: Insights }) {
+  const { t, lang } = useI18n()
+  const rows = comparisonRows(insights)
+  if (rows.length === 0) return null
+
+  const label = (row: ComparisonRow): string => {
+    switch (row.kind) {
+      case 'all':
+        return t('cmp.all')
+      case 'location':
+        return t(`cmp.${insights.location}` as Key)
+      case 'occupation':
+        return insights.occupation?.code
+          ? occupationDisplayName(insights.occupation.code, lang)
+          : (insights.occupation?.name ?? '')
+    }
+  }
+
+  return (
+    <div>
+      <h3 className="text-lg font-semibold tracking-tight">{t('cmp.title')}</h3>
+      <ul className="mt-3 grid gap-2">
+        {rows.map((row) => (
+          <li key={row.kind} className="flex items-center justify-between gap-4 rounded-xl bg-white px-4 py-3">
+            <span className="min-w-0">
+              <span className="block text-sm font-medium">{label(row)}</span>
+              <span className="block text-xs text-stone-500">{t('cmp.n', { n: row.n })}</span>
+            </span>
+            <span className="shrink-0 text-right">
+              {row.percentile !== undefined ? (
+                <span className="text-lg font-semibold tracking-tight">{t('ins.pct', { p: row.percentile })}</span>
+              ) : (
+                <span className="text-xs text-stone-500">{t('cmp.first')}</span>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+// Every submitted score ranked from lowest to highest, as a bar from the 0th to the 100th percentile. The
+// candidate sits at their own percentile, and the median and the average are marked on the same bar.
+function PercentileBar({ insights }: { insights: Insights }) {
+  const { t } = useI18n()
+  const { overall } = insights
+  if (!isRanked(overall)) return null
+  const p = overall.percentile
+  const mean = overall.mean
+  const meanAt = overall.meanPercentile
+
+  return (
+    <section>
+      <h3 className="text-lg font-semibold tracking-tight">{t('rank.title')}</h3>
+      <p className="mt-0.5 text-sm text-stone-500">{t('rank.among', { n: overall.n })}</p>
+
+      <div
+        className="relative mt-11 mb-2 h-3 rounded-full bg-stone-200"
+        role="img"
+        aria-label={t('rank.youAt', { p })}
+      >
+        <div className="absolute inset-y-0 left-0 rounded-full bg-indigo-200" style={{ width: `${p}%` }} />
+        {/* The median is the 50th percentile by definition. */}
+        <Tick at={50} className="bg-stone-900" />
+        {meanAt !== undefined && <Tick at={meanAt} className="bg-amber-500" />}
+        <div
+          className="absolute top-1/2 size-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-accent shadow"
+          style={{ left: `${p}%` }}
+        />
+        <div
+          className="absolute -top-9 -translate-x-1/2 rounded-md bg-accent px-2 py-1 text-xs font-medium whitespace-nowrap text-white"
+          style={{ left: `clamp(3rem, ${p}%, calc(100% - 3rem))` }}
+        >
+          {t('rank.youAt', { p })}
+        </div>
+      </div>
+      <div className="flex justify-between text-xs text-stone-400">
+        <span>{t('rank.low')}</span>
+        <span>{t('rank.high')}</span>
+      </div>
+
+      <dl className="mt-4 grid grid-cols-3 gap-3 text-center">
+        <Stat label={t('rank.score')} value={String(insights.total)} swatch="bg-accent" />
+        <Stat label={t('rank.median')} value={String(overall.median)} swatch="bg-stone-900" />
+        <Stat label={t('rank.average')} value={mean === undefined ? '-' : String(mean)} swatch="bg-amber-500" />
+      </dl>
+    </section>
+  )
+}
+
+function Tick({ at, className }: { at: number; className: string }) {
+  return <div className={`absolute -top-1 h-5 w-0.5 -translate-x-1/2 rounded ${className}`} style={{ left: `${at}%` }} />
+}
+
+function Stat({ label, value, swatch }: { label: string; value: string; swatch: string }) {
   return (
     <div className="rounded-xl bg-white px-2 py-3">
-      <p className="text-lg font-semibold tracking-tight">{value}</p>
-      <p className="mt-0.5 text-xs text-stone-500">{label}</p>
+      <dt className="flex items-center justify-center gap-1.5 text-xs text-stone-500">
+        <span className={`size-2 rounded-full ${swatch}`} />
+        {label}
+      </dt>
+      <dd className="mt-1 text-xl font-semibold tracking-tight tabular-nums">{value}</dd>
     </div>
   )
 }
 
-function Distribution(props: {
-  histogram: NonNullable<Insights['overall']['histogram']>
-  total: number
-  p25?: number
-  p75?: number
-}) {
-  const { t } = useI18n()
-  const yourBin = Math.min(Math.floor(props.total / 50), 18)
-  const counts = new Map(props.histogram.map((b) => [b.from / 50, b.count]))
-  const lo = Math.min(yourBin, ...counts.keys())
-  const hi = Math.max(yourBin, ...counts.keys())
-  const bins = Array.from({ length: hi - lo + 1 }, (_, i) => lo + i)
-  const peak = Math.max(1, ...counts.values())
-
-  return (
-    <div>
-      <h3 className="text-lg font-semibold tracking-tight">{t('ins.distTitle')}</h3>
-      <div className="mt-4 flex h-28 items-end gap-1" role="img" aria-label={t('ins.distAria')}>
-        {bins.map((b) => {
-          const count = counts.get(b) ?? 0
-          return (
-            <div
-              key={b}
-              className={`flex-1 rounded-t ${b === yourBin ? 'bg-accent' : 'bg-stone-300'}`}
-              style={{ height: `${Math.max(4, (count / peak) * 100)}%` }}
-            />
-          )
-        })}
-      </div>
-      <div className="mt-2 flex justify-between text-xs text-stone-400">
-        <span>{lo * 50}</span>
-        <span>{(hi + 1) * 50}</span>
-      </div>
-      <p className="mt-2 text-xs text-stone-500">
-        {t('ins.distNote')}
-        {props.p25 !== undefined && props.p75 !== undefined && t('ins.distIqr', { p25: props.p25, p75: props.p75 })}
-      </p>
-    </div>
-  )
-}
-
-function CategoryCompare(props: {
-  result: VptResult
-  avg: NonNullable<Insights['overall']['categoryAvg']>
-  percentile?: Insights['overall']['categoryPercentile']
-}) {
+// One bar chart per section. Section scores are discrete, so each bar is one possible score and its height is how
+// many candidates got it. The candidate's own score is highlighted.
+function SectionCharts({ result, overall }: { result: VptResult; overall: PoolStats }) {
   const { t } = useI18n()
   return (
-    <div>
-      <h3 className="text-lg font-semibold tracking-tight">{t('ins.cmpTitle')}</h3>
-      <ul className="mt-4 grid gap-4">
-        {props.result.categories.filter((c) => c.applicable).map((c) => {
-          const avg = props.avg[c.key] ?? 0
-          const delta = Math.round(c.points - avg)
-          const pct = props.percentile?.[c.key]
+    <section>
+      <h3 className="text-lg font-semibold tracking-tight">{t('sec.title')}</h3>
+      <p className="mt-0.5 text-xs text-stone-500">{t('sec.legend')}</p>
+      <ul className="mt-4 grid gap-6">
+        {result.categories.map((c) => {
+          const dist = overall.categoryDist?.[c.key]
+          const pct = overall.categoryPercentile?.[c.key]
+          const avg = overall.categoryAvg?.[c.key]
           return (
             <li key={c.key}>
               <div className="flex items-baseline justify-between gap-3 text-sm">
                 <span className="font-medium">{t(`cat.${c.key}` as Key)}</span>
                 <span className="shrink-0 tabular-nums text-stone-500">
-                  {t('ins.cmpVs', { a: c.points, b: Math.round(avg) })}{' '}
-                  <span className={delta >= 0 ? 'text-emerald-600' : 'text-amber-600'}>
-                    ({delta >= 0 ? '+' : ''}
-                    {delta})
-                  </span>
+                  {c.points} <span className="text-stone-300">/ {c.max}</span>
                 </span>
               </div>
-              <div className="relative mt-2 h-2 rounded-full bg-stone-200">
-                <div className="h-full rounded-full bg-accent" style={{ width: `${(c.points / c.max) * 100}%` }} />
-                <div
-                  className="absolute -top-1 h-4 w-0.5 rounded bg-stone-900"
-                  style={{ left: `${Math.min(100, (avg / c.max) * 100)}%` }}
-                  title={t('ins.avg')}
-                />
-              </div>
-              {pct !== undefined && <p className="mt-1.5 text-xs font-medium text-stone-500">{t('ins.pct', { p: pct })}</p>}
+              {dist ? (
+                <ScoreBars dist={dist} mine={c.points} />
+              ) : (
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-200">
+                  <div className="h-full rounded-full bg-accent" style={{ width: `${(c.points / c.max) * 100}%` }} />
+                </div>
+              )}
+              <p className="mt-1.5 text-xs font-medium text-stone-500">
+                {pct !== undefined && t('ins.pct', { p: pct })}
+                {pct !== undefined && avg !== undefined && ' · '}
+                {avg !== undefined && t('sec.avg', { avg: Math.round(avg) })}
+              </p>
             </li>
           )
         })}
       </ul>
-      <p className="mt-3 text-xs text-stone-500">{t('ins.cmpNote')}</p>
-      {props.percentile && <p className="mt-1 text-xs leading-relaxed text-stone-500">{t('ins.pctNote')}</p>}
+      {overall.categoryPercentile && (
+        <p className="mt-4 text-xs leading-relaxed text-stone-500">{t('ins.pctNote')}</p>
+      )}
+    </section>
+  )
+}
+
+function ScoreBars({ dist, mine }: { dist: { points: number; count: number }[]; mine: number }) {
+  const { t } = useI18n()
+  const counts = new Map(dist.map((d) => [d.points, d.count]))
+  // Keep the candidate's own score on the chart even if no one is recorded at it.
+  if (!counts.has(mine)) counts.set(mine, 0)
+  const values = [...counts.keys()].sort((a, b) => a - b)
+  const peak = Math.max(1, ...counts.values())
+  // Label every bar when there are few, otherwise only the two ends and the candidate's own score.
+  const labelAll = values.length <= 8
+
+  return (
+    <div className="mt-2">
+      <div className="flex h-16 items-end gap-1">
+        {values.map((v) => {
+          const count = counts.get(v) ?? 0
+          return (
+            <div
+              key={v}
+              title={t('sec.bar', { count, points: v })}
+              aria-label={t('sec.bar', { count, points: v })}
+              className={`flex-1 rounded-t ${v === mine ? 'bg-accent' : 'bg-stone-300'}`}
+              style={{ height: `${Math.max(count === 0 ? 4 : 8, (count / peak) * 100)}%` }}
+            />
+          )
+        })}
+      </div>
+      <div className="mt-1 flex gap-1 text-[10px] text-stone-400 tabular-nums">
+        {values.map((v, i) => (
+          <span
+            key={v}
+            className={`flex-1 text-center ${v === mine ? 'font-semibold text-accent' : ''}`}
+          >
+            {labelAll || i === 0 || i === values.length - 1 || v === mine ? v : ''}
+          </span>
+        ))}
+      </div>
     </div>
   )
 }

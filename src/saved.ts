@@ -11,7 +11,9 @@ export interface HistoryEntry {
   id: string
   total: number
   location: 'onshore' | 'offshore'
+  // The English title or typed text, and the ANZSCO code when the occupation was picked from the list.
   occupation: string | null
+  occupationCode: string | null
   savedAt: number
 }
 
@@ -23,9 +25,17 @@ function toEntry(value: unknown): HistoryEntry | null {
     typeof e.total === 'number' && Number.isFinite(e.total) &&
     (e.location === 'onshore' || e.location === 'offshore') &&
     typeof e.savedAt === 'number' && Number.isFinite(e.savedAt) &&
-    (e.occupation === undefined || e.occupation === null || typeof e.occupation === 'string')
+    (e.occupation === undefined || e.occupation === null || typeof e.occupation === 'string') &&
+    (e.occupationCode === undefined || e.occupationCode === null || /^\d{6}$/.test(String(e.occupationCode)))
   ) {
-    return { id: e.id, total: e.total, location: e.location, occupation: e.occupation ?? null, savedAt: e.savedAt }
+    return {
+      id: e.id,
+      total: e.total,
+      location: e.location,
+      occupation: e.occupation ?? null,
+      occupationCode: e.occupationCode ?? null,
+      savedAt: e.savedAt,
+    }
   }
   return null
 }

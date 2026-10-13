@@ -59,15 +59,25 @@ describe('offshore', () => {
     location: 'offshore' as const, age: 25, english: 'superior' as const, experienceYears: 10,
     education: 'phd' as const, skillLevel: 1 as const, partnerQualifies: true, annualEarnings: 200_000,
   }
-  it('drops Victorian earnings from the score and the maximum', () => {
+  it('scores 0 income points but still counts the section, so the maximum stays 950', () => {
     const r = calculateVpt(base)
-    expect(r.max).toBe(800)
+    expect(r.max).toBe(950)
     expect(r.total).toBe(800)
-    const earnings = r.categories.find((c) => c.key === 'earnings')!
-    expect(earnings).toMatchObject({ points: 0, applicable: false })
+    expect(r.categories).toHaveLength(7)
+    expect(r.categories.find((c) => c.key === 'earnings')).toMatchObject({ points: 0, max: 150 })
   })
   it('ignores any earnings value offshore', () => {
     expect(calculateVpt({ ...base, annualEarnings: 0 }).total).toBe(calculateVpt(base).total)
+    expect(calculateVpt({ ...base, annualEarnings: 1_000_000 }).total).toBe(800)
+  })
+  it('scores the same as an onshore candidate with no qualifying income', () => {
+    expect(calculateVpt(base).total).toBe(calculateVpt({ ...base, location: 'onshore', annualEarnings: 0 }).total)
+  })
+  it('lets an onshore candidate with the same answers earn the points', () => {
+    expect(calculateVpt({ ...base, location: 'onshore' }).total).toBe(950)
+  })
+  it('no longer flags any section as not applicable', () => {
+    for (const c of calculateVpt(base).categories) expect(c).not.toHaveProperty('applicable')
   })
 })
 
