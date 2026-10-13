@@ -515,7 +515,7 @@ describe('support card', () => {
     expect(coffee.getAttribute('href')).toBe('https://buymeacoffee.com/shangjie')
     expect(coffee.getAttribute('target')).toBe('_blank')
     expect(coffee.getAttribute('rel')).toContain('noopener')
-    expect(screen.getByText(/Any amount is appreciated/)).toBeTruthy()
+    expect(screen.getByText(/any amount is appreciated/)).toBeTruthy()
     expect(screen.queryByText('Send feedback')).toBeNull()
     // It comes after the share link and before the disclaimer.
     const share = screen.getByText('Keep this link to return to your result.')
@@ -545,7 +545,7 @@ describe('support card', () => {
 
   it('is shown in Chinese', async () => {
     await open(withCharts, 'zh')
-    expect(screen.getByText('请我喝杯咖啡')).toBeTruthy()
+    expect(screen.getByText('给Ta打赏')).toBeTruthy()
   })
 })
 
