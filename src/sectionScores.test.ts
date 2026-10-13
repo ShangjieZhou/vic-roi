@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { calculateVpt, type VptInput } from '../supabase/functions/_shared/scoring'
-import { SECTION_SCORES, medianScore, topPercent } from './sectionScores'
+import { SECTION_SCORES, medianScore, selectionFor, topPercent } from './sectionScores'
 
 describe('SECTION_SCORES', () => {
   it('lists every discrete score, lowest first', () => {
@@ -40,4 +40,26 @@ describe('medianScore', () => {
     expect(medianScore([{ points: 10, count: 1 }, { points: 20, count: 1 }, { points: 30, count: 1 }])).toBe(20)
   })
   it('is undefined with no candidates', () => expect(medianScore([])).toBeUndefined())
+})
+
+describe('selectionFor', () => {
+  it('names what earns each median score', () => {
+    expect(selectionFor('experience', 40)).toEqual({ key: 'opt.exp.2' })
+    expect(selectionFor('experience', 100)).toEqual({ key: 'opt.exp.9' })
+    expect(selectionFor('english', 200)).toEqual({ key: 'opt.english.superior' })
+    expect(selectionFor('education', 75)).toEqual({ key: 'opt.edu.masters' })
+    expect(selectionFor('skillLevel', 50)).toEqual({ key: 'opt.skill.1' })
+    expect(selectionFor('partner', 50)).toEqual({ key: 'sel.partner.yes' })
+    expect(selectionFor('age', 300)).toEqual({ key: 'sel.ages', params: { a: 20, b: 29 } })
+    expect(selectionFor('age', 286)).toEqual({ key: 'sel.age', params: { a: 30 } })
+    expect(selectionFor('age', 0)).toEqual({ key: 'sel.age.other' })
+    expect(selectionFor('earnings', 0)).toEqual({ key: 'sel.earn.zero' })
+    expect(selectionFor('earnings', 8)).toEqual({ key: 'sel.earn.band', params: { from: '80,000', to: '84,999' } })
+    expect(selectionFor('earnings', 150)).toEqual({ key: 'sel.earn.max', params: { from: '170,000' } })
+  })
+
+  it('has a selection for every listed score', () => {
+    for (const [key, list] of Object.entries(SECTION_SCORES))
+      for (const points of list) expect(selectionFor(key as never, points), `${key} ${points}`).not.toBeNull()
+  })
 })

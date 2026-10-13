@@ -25,7 +25,7 @@ import { useI18n, type Key } from './i18n'
 import { OccupationPicker } from './OccupationPicker'
 import { occupationDisplayName } from './occupationSearch'
 import { PartnerRequirements } from './PartnerRequirements'
-import { SECTION_SCORES, medianScore, topPercent } from './sectionScores'
+import { SECTION_SCORES, medianScore, selectionFor, topPercent } from './sectionScores'
 import { Turnstile } from './Turnstile'
 
 export function Results(props: {
@@ -375,7 +375,7 @@ function Comparison({ insights }: { insights: Insights }) {
             </span>
             <span className="shrink-0 text-right">
               {row.percentile !== undefined ? (
-                <span className="text-lg font-semibold tracking-tight">{t('ins.pct', { p: topPercent(row.percentile) })}</span>
+                <span className="text-lg font-semibold tracking-tight text-accent">{t('ins.pct', { p: topPercent(row.percentile) })}</span>
               ) : (
                 <span className="text-xs text-stone-500">{t('cmp.first')}</span>
               )}
@@ -429,7 +429,7 @@ function PercentileBar({ insights }: { insights: Insights }) {
       </div>
 
       <dl className="mt-4 grid grid-cols-3 gap-3 text-center">
-        <Stat label={t('rank.score')} value={String(insights.total)} swatch="bg-accent" />
+        <Stat label={t('rank.score')} value={String(insights.total)} swatch="bg-accent" highlight />
         <Stat label={t('rank.median')} value={String(overall.median)} swatch="bg-stone-900" />
         <Stat label={t('rank.average')} value={mean === undefined ? '-' : String(mean)} swatch="bg-amber-500" />
       </dl>
@@ -441,14 +441,14 @@ function Tick({ at, className }: { at: number; className: string }) {
   return <div className={`absolute -top-1 h-5 w-0.5 -translate-x-1/2 rounded ${className}`} style={{ left: `${at}%` }} />
 }
 
-function Stat({ label, value, swatch }: { label: string; value: string; swatch: string }) {
+function Stat({ label, value, swatch, highlight }: { label: string; value: string; swatch: string; highlight?: boolean }) {
   return (
     <div className="rounded-xl bg-white px-2 py-3">
       <dt className="flex items-center justify-center gap-1.5 text-xs text-stone-500">
         <span className={`size-2 rounded-full ${swatch}`} />
         {label}
       </dt>
-      <dd className="mt-1 text-xl font-semibold tracking-tight tabular-nums">{value}</dd>
+      <dd className={`mt-1 text-xl font-semibold tracking-tight tabular-nums ${highlight ? 'text-accent' : ''}`}>{value}</dd>
     </div>
   )
 }
@@ -466,25 +466,27 @@ function SectionCharts({ result, overall }: { result: VptResult; overall: PoolSt
           const dist = overall.categoryDist?.[c.key]
           const pct = overall.categoryPercentile?.[c.key]
           const median = dist ? medianScore(dist) : undefined
+          const selection = median === undefined ? null : selectionFor(c.key, median)
           return (
             <li key={c.key}>
               <div className="flex items-baseline justify-between gap-3 text-sm">
                 <span className="font-medium">{t(`cat.${c.key}` as Key)}</span>
                 <span className="shrink-0 tabular-nums text-stone-500">
-                  {c.points} <span className="text-stone-300">/ {c.max}</span>
+                  <span className="font-semibold text-accent">{c.points}</span> <span className="text-stone-300">/ {c.max}</span>
                 </span>
               </div>
               {dist ? (
-                <ScoreBars dist={dist} mine={c.points} median={median} all={SECTION_SCORES[c.key]} />
+                <ScoreBars dist={dist} mine={c.points} all={SECTION_SCORES[c.key]} />
               ) : (
                 <div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-200">
                   <div className="h-full rounded-full bg-accent" style={{ width: `${(c.points / c.max) * 100}%` }} />
                 </div>
               )}
               <p className="mt-1.5 text-xs font-medium text-stone-500">
-                {pct !== undefined && t('ins.pct', { p: topPercent(pct) })}
+                {pct !== undefined && <span className="font-semibold text-accent">{t('ins.pct', { p: topPercent(pct) })}</span>}
                 {pct !== undefined && median !== undefined && ' · '}
                 {median !== undefined && t('sec.median', { median })}
+                {median !== undefined && selection && ` | ${t(selection.key as Key, selection.params)}`}
               </p>
             </li>
           )
@@ -500,12 +502,10 @@ function SectionCharts({ result, overall }: { result: VptResult; overall: PoolSt
 function ScoreBars({
   dist,
   mine,
-  median,
   all,
 }: {
   dist: { points: number; count: number }[]
   mine: number
-  median: number | undefined
   all: number[]
 }) {
   const { t } = useI18n()
@@ -532,22 +532,12 @@ function ScoreBars({
           )
         })}
       </div>
-      {/* A dark mark under the bar at the median score. */}
-      <div className={`mt-0.5 flex ${dense ? 'gap-0.5' : 'gap-1'}`}>
-        {values.map((v) => (
-          <span
-            key={v}
-            data-median={v === median ? 'true' : undefined}
-            className={`h-1 flex-1 rounded-b ${v === median ? 'bg-stone-900' : ''}`}
-          />
-        ))}
-      </div>
       <div className={`mt-1 flex text-[10px] text-stone-400 tabular-nums ${dense ? 'gap-0.5' : 'gap-1'}`}>
         {values.map((v) => (
           <span
             key={v}
             className={`flex-1 text-center ${dense ? '[writing-mode:vertical-rl] rotate-180' : ''} ${
-              v === mine ? 'font-semibold text-accent' : v === median ? 'font-semibold text-stone-900' : ''
+              v === mine ? 'font-semibold text-accent' : ''
             }`}
           >
             {v}

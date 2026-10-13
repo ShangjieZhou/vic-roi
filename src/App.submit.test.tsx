@@ -383,7 +383,7 @@ describe('the analysis page', () => {
     it('draws one bar chart per section, with a bar for each score', async () => {
       await open(withCharts)
       expect(screen.getByText('Your score in each section')).toBeTruthy()
-      expect(screen.getByText('Bars show how many candidates scored each value. Your score is highlighted, and a dark mark shows the median.')).toBeTruthy()
+      expect(screen.getByText('Bars show how many candidates scored each value. Your score is highlighted.')).toBeTruthy()
       for (const label of [
         'Age', 'English language', 'Experience in nominated occupation', 'Education',
         'Occupation skill level', "Partner's skill", 'Victorian skilled earnings',
@@ -412,11 +412,12 @@ describe('the analysis page', () => {
     it('shows the top percent and the median under each section', async () => {
       await open(withCharts)
       for (const text of [
-        'Top 22% · Median 300', 'Top 79% · Median 100', 'Top 60% · Median 60',
-        'Top 67% · Median 50', 'Top 37% · Median 50', 'Top 53% · Median 0',
-        'Top 13% · Median 0',
+        'Top 22% · Median 300 | Ages 20 to 29', 'Top 79% · Median 100 | Proficient',
+        'Top 60% · Median 60 | 3 to 5 years', "Top 67% · Median 50 | Bachelor's or Honours",
+        'Top 37% · Median 50 | Skill level 1', 'Top 53% · Median 0 | No partner points',
+        'Top 13% · Median 0 | Under $80,000, or offshore',
       ]) {
-        expect(screen.getByText(text), text).toBeTruthy()
+        expect(screen.getByText((_, el) => el?.tagName === 'P' && el.textContent === text), text).toBeTruthy()
       }
     })
 
@@ -431,10 +432,11 @@ describe('the analysis page', () => {
       expect(screen.getAllByTitle('0 candidates at 150 points')[0]).toBeTruthy()
     })
 
-    it('marks the bar at the median score', async () => {
+    it('highlights the candidate\'s own numbers', async () => {
       await open(withCharts)
-      const marks = document.querySelectorAll('[data-median="true"]')
-      expect(marks).toHaveLength(7)
+      expect(screen.getByText('Top 22%').className).toContain('text-accent')
+      expect(screen.getByText('Your score').nextSibling).toHaveProperty('className', expect.stringContaining('text-accent'))
+      expect(screen.getByText('Top 22%')).toBeTruthy()
     })
 
     it('explains how the top percent treats ties', async () => {
@@ -467,7 +469,7 @@ describe('the analysis page', () => {
     it('is shown in Chinese', async () => {
       await open(withCharts, 'zh')
       expect(screen.getByText('各部分得分分布')).toBeTruthy()
-      expect(screen.getByText('前22% · 中位数 300')).toBeTruthy()
+      expect(screen.getByText((_, el) => el?.tagName === 'P' && el.textContent === '前22% · 中位数 300 | 20 至 29 岁')).toBeTruthy()
       expect(screen.getByTitle('286 分：4 位候选人')).toBeTruthy()
       expect(screen.getByText(/“前xx%”表示得分高于您的候选人所占比例/)).toBeTruthy()
     })
