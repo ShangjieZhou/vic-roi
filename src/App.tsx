@@ -1,139 +1,267 @@
-import { useEffect, useState } from 'react'
-import {
-  calculateVpt,
-  type EducationLevel,
-  type EnglishLevel,
-  type SkillLevel,
-  type VptInput,
+import { useCallback, useEffect, useState } from 'react'
+import type {
+  EducationLevel,
+  EnglishLevel,
+  SkillLevel,
+  VptDraft,
 } from '../supabase/functions/_shared/scoring'
-import { loadSubmission, saveSubmission, type SaveOutcome } from './api'
+import { loadSubmission, type Submission } from './api'
+import { money } from './format'
+import { HistoryList } from './History'
+import { LockIcon } from './icons'
+import { useI18n, type Key, type Lang } from './i18n'
+import { PartnerRequirements } from './PartnerRequirements'
+import { Results } from './Results'
+import { addToHistory, clearHistory, loadHistory, removeFromHistory, type HistoryEntry } from './saved'
 
-type Answers = Partial<VptInput>
-type Choice<T> = { value: T; label: string; hint?: string }
+type Answers = Partial<VptDraft>
+type Choice<T> = { value: T; label: Key; hint?: Key }
 
 const ENGLISH: Choice<EnglishLevel>[] = [
-  { value: 'competent', label: 'Competent', hint: 'IELTS 6 or equivalent' },
-  { value: 'proficient', label: 'Proficient', hint: 'IELTS 7 or equivalent' },
-  { value: 'superior', label: 'Superior', hint: 'IELTS 8 or equivalent' },
+  { value: 'competent', label: 'opt.english.competent', hint: 'opt.english.competent.hint' },
+  { value: 'proficient', label: 'opt.english.proficient', hint: 'opt.english.proficient.hint' },
+  { value: 'superior', label: 'opt.english.superior', hint: 'opt.english.superior.hint' },
+]
+// Values are band codes, not literal years: 0 none, 1 under 1 year, 2 for 1 to 3, 4 for 3 to 5, 6 for 6 to 8, 9 for more than 8.
+const EXPERIENCE: Choice<number>[] = [
+  { value: 0, label: 'opt.exp.0' },
+  { value: 1, label: 'opt.exp.1' },
+  { value: 2, label: 'opt.exp.2' },
+  { value: 4, label: 'opt.exp.4' },
+  { value: 6, label: 'opt.exp.6' },
+  { value: 9, label: 'opt.exp.9' },
 ]
 const EDUCATION: Choice<EducationLevel>[] = [
-  { value: 'other', label: 'Other qualification', hint: 'Diploma, trade or other' },
-  { value: 'bachelors', label: "Bachelor's or Honours" },
-  { value: 'masters', label: "Master's" },
-  { value: 'phd', label: 'PhD' },
+  { value: 'other', label: 'opt.edu.other', hint: 'opt.edu.other.hint' },
+  { value: 'bachelors', label: 'opt.edu.bachelors' },
+  { value: 'masters', label: 'opt.edu.masters' },
+  { value: 'phd', label: 'opt.edu.phd' },
 ]
-const SKILL: Choice<SkillLevel>[] = [
-  { value: 1, label: 'Skill level 1', hint: 'Bachelor degree or higher (ANZSCO)' },
-  { value: 2, label: 'Skill level 2', hint: 'Advanced diploma or diploma' },
-  { value: 3, label: 'Skill level 3', hint: 'Certificate IV or III with experience' },
+const SKILL: Choice<SkillLevel | 'unsure'>[] = [
+  { value: 1, label: 'opt.skill.1', hint: 'opt.skill.1.hint' },
+  { value: 2, label: 'opt.skill.2', hint: 'opt.skill.2.hint' },
+  { value: 3, label: 'opt.skill.3', hint: 'opt.skill.3.hint' },
+  { value: 'unsure', label: 'opt.unsure', hint: 'opt.unsure.hint' },
 ]
-const PARTNER: Choice<boolean>[] = [
-  { value: true, label: 'Yes, all three apply', hint: 'You claimed 10 partner skill points in your EOI, your partner is on the application, and their occupation is on the current priority list' },
-  { value: false, label: 'No, or not sure', hint: 'Single, Australian partner, or the requirements are not all met' },
+const PARTNER: Choice<boolean | 'unsure'>[] = [
+  { value: true, label: 'opt.partner.yes', hint: 'opt.partner.yes.hint' },
+  { value: false, label: 'opt.partner.no' },
+  { value: 'unsure', label: 'opt.unsure', hint: 'opt.unsure.hint' },
 ]
 
 const STEPS = ['age', 'english', 'experience', 'education', 'skillLevel', 'partner', 'earnings'] as const
 type Step = (typeof STEPS)[number]
 
-const money = new Intl.NumberFormat('en-AU')
-
 function sharedId(): string | null {
   return window.location.pathname.match(/^\/r\/([0-9a-f-]{36})$/i)?.[1] ?? null
 }
 
+// Moves to a path with a real history entry, so the browser Back button returns to where the visitor was.
+function go(path: string) {
+  if (window.location.pathname !== path) window.history.pushState(null, '', path)
+}
+
 export function App() {
+  const { t } = useI18n()
   const [answers, setAnswers] = useState<Answers>({})
   const [step, setStep] = useState(0)
-  const [input, setInput] = useState<VptInput | null>(null)
-  const [save, setSave] = useState<SaveOutcome | 'saving' | null>(null)
+  const [input, setInput] = useState<VptDraft | null>(null)
+  const [submission, setSubmission] = useState<Submission | null>(null)
   const [loadingShared, setLoadingShared] = useState(() => sharedId() !== null)
+  const [history, setHistory] = useState<HistoryEntry[]>(loadHistory)
 
-  useEffect(() => {
-    const id = sharedId()
-    if (!id) return
+  const resetWizard = () => {
+    setAnswers({})
+    setStep(0)
+    setInput(null)
+    setSubmission(null)
+  }
+
+  // Opens a stored result by id. A result the server no longer has is dropped from the history.
+  const showResult = useCallback((id: string) => {
+    setLoadingShared(true)
+    setInput(null)
+    setSubmission(null)
     loadSubmission(id).then((loaded) => {
-      if (loaded) {
-        setInput(loaded)
-        setSave({ status: 'saved', id })
+      if (loaded && loaded !== 'not_found') {
+        setInput(loaded.input)
+        setSubmission(loaded.submission)
       } else {
+        if (loaded === 'not_found') setHistory(removeFromHistory(id))
         window.history.replaceState(null, '', '/')
       }
       setLoadingShared(false)
     })
   }, [])
 
-  const finish = (final: VptInput) => {
-    setInput(final)
-    setSave('saving')
-    saveSubmission(final).then((outcome) => {
-      setSave(outcome)
-      if (outcome.status === 'saved') window.history.replaceState(null, '', `/r/${outcome.id}`)
-    })
-  }
+  useEffect(() => {
+    const id = sharedId()
+    if (id) showResult(id)
+    // Back and Forward move between the home screen and individual results.
+    const onPop = () => {
+      const popped = sharedId()
+      if (popped) {
+        showResult(popped)
+      } else {
+        resetWizard()
+        setLoadingShared(false)
+      }
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [showResult])
 
   const answer = (patch: Answers) => {
     const next = { ...answers, ...patch }
     setAnswers(next)
-    if (step === STEPS.length - 1) finish(next as VptInput)
+    // Location is only known from the last answer, so anyone who does not pick offshore there is onshore.
+    if (step === STEPS.length - 1) setInput({ ...next, location: next.location ?? 'onshore' } as VptDraft)
     else setStep(step + 1)
   }
 
-  const restart = () => {
-    setAnswers({})
-    setStep(0)
-    setInput(null)
-    setSave(null)
-    window.history.replaceState(null, '', '/')
+  const submitted = (s: Submission) => {
+    setSubmission(s)
+    go(`/r/${s.id}`)
+    setHistory(
+      addToHistory({
+        id: s.id,
+        total: s.insights.total,
+        location: s.insights.location,
+        occupation: s.occupation,
+        savedAt: Date.now(),
+      }),
+    )
+  }
+
+  // Re-reads the result so analysis appears once the pool is large enough, without a page reload.
+  const refreshInsights = async () => {
+    if (!submission) return
+    const loaded = await loadSubmission(submission.id)
+    if (loaded && loaded !== 'not_found') setSubmission(loaded.submission)
+  }
+
+  const goHome = () => {
+    go('/')
+    resetWizard()
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-xl flex-col px-5 py-10">
-      <header className="mb-10 flex items-baseline justify-between">
-        <h1 className="text-sm font-semibold tracking-wide text-stone-900">VPT Calculator</h1>
-        <span className="text-xs text-stone-500">Victoria 2026-27</span>
+    <main className="mx-auto flex min-h-dvh max-w-xl flex-col px-5 pt-[max(1.5rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+      <header className="mb-6 flex items-center justify-between gap-3">
+        <div>
+          <h1 className="text-sm font-semibold tracking-wide text-stone-900">{t('app.title')}</h1>
+          <p className="mt-0.5 text-xs text-stone-500">{t('app.edition')}</p>
+        </div>
+        <LangToggle />
       </header>
 
       <div className="flex-1">
         {loadingShared ? (
-          <p className="text-stone-500">Loading your result...</p>
+          <p className="text-stone-500">{t('app.loading')}</p>
         ) : input ? (
-          <Results input={input} save={save} onRestart={restart} />
+          <>
+            {submission && history.length > 0 && (
+              <button
+                onClick={goHome}
+                className="-ml-3 mb-2 inline-flex min-h-11 items-center px-3 text-sm font-medium text-accent active:opacity-60"
+              >
+                ‹ {t('hist.back')}
+              </button>
+            )}
+            <Results
+              draft={input}
+              submission={submission}
+              onRefine={(patch) => setInput({ ...input, ...patch })}
+              onRefresh={refreshInsights}
+              onSubmitted={submitted}
+              onRestart={goHome}
+            />
+          </>
         ) : (
-          <Question
-            key={STEPS[step]}
-            step={STEPS[step]}
-            index={step}
-            answers={answers}
-            onAnswer={answer}
-            onBack={step > 0 ? () => setStep(step - 1) : undefined}
-          />
+          <>
+            {step === 0 && (
+              <>
+                <p className="mb-6 flex items-start gap-1.5 text-sm text-stone-500">
+                  <LockIcon className="mt-0.5 size-4 text-emerald-700" />
+                  <span>{t('home.privacy')}</span>
+                </p>
+                {history.length > 0 && (
+                  <HistoryList
+                    entries={history}
+                    onOpen={(id) => {
+                      go(`/r/${id}`)
+                      showResult(id)
+                    }}
+                    onClear={() => {
+                      clearHistory()
+                      setHistory([])
+                    }}
+                  />
+                )}
+              </>
+            )}
+            <Question
+              key={STEPS[step]}
+              step={STEPS[step]}
+              index={step}
+              total={STEPS.length}
+              answers={answers}
+              onAnswer={answer}
+              onBack={step > 0 ? () => setStep(step - 1) : undefined}
+            />
+          </>
         )}
       </div>
 
       <footer className="mt-12 text-xs leading-relaxed text-stone-400">
-        An unofficial estimate based on the published Victorian Points Test. It does not guarantee a nomination.
-        Check the{' '}
+        {t('footer.before')}
         <a className="underline" href="https://liveinmelbourne.vic.gov.au/migrate/skilled-migration-visas/vpt">
-          official page
-        </a>{' '}
-        before you act on a score.
+          {t('footer.link')}
+        </a>
+        {t('footer.after')}
       </footer>
     </main>
   )
 }
 
-function Progress({ index }: { index: number }) {
+const LANGUAGES: { value: Lang; label: string }[] = [
+  { value: 'en', label: 'English' },
+  { value: 'zh', label: '中文' },
+]
+
+// Both languages are always visible, so a visitor can find theirs whichever the page is currently in.
+function LangToggle() {
+  const { lang, setLang, t } = useI18n()
   return (
-    <div className="mb-8" aria-label={`Step ${index + 1} of ${STEPS.length}`}>
+    <div role="group" aria-label={t('lang.label')} className="flex shrink-0 rounded-full bg-stone-200/70 p-0.5 text-xs">
+      {LANGUAGES.map((o) => (
+        <button
+          key={o.value}
+          aria-pressed={lang === o.value}
+          onClick={() => setLang(o.value)}
+          className={`min-h-10 rounded-full px-3.5 font-medium transition ${
+            lang === o.value ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 active:text-stone-900'
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function Progress({ index, total }: { index: number; total: number }) {
+  const { t } = useI18n()
+  const label = t('progress.step', { n: index + 1, total })
+  return (
+    <div className="mb-8" aria-label={label}>
       <div className="h-1 overflow-hidden rounded-full bg-stone-200">
         <div
           className="h-full rounded-full bg-accent transition-all duration-300"
-          style={{ width: `${((index + 1) / STEPS.length) * 100}%` }}
+          style={{ width: `${((index + 1) / total) * 100}%` }}
         />
       </div>
-      <p className="mt-2 text-xs text-stone-500">
-        Step {index + 1} of {STEPS.length}
-      </p>
+      <p className="mt-2 text-xs text-stone-500">{label}</p>
     </div>
   )
 }
@@ -141,69 +269,94 @@ function Progress({ index }: { index: number }) {
 function Question(props: {
   step: Step
   index: number
+  total: number
   answers: Answers
   onAnswer: (patch: Answers) => void
   onBack?: () => void
 }) {
-  const { step, index, answers, onAnswer, onBack } = props
+  const { step, index, total, answers, onAnswer, onBack } = props
+  const { t } = useI18n()
+  // Braces matter: an effect that returns a value makes React treat it as a cleanup function.
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [])
   let body: React.ReactNode
   switch (step) {
     case 'age':
       body = (
         <NumberStep
-          title="How old are you?"
-          hint="Your age at the time of invitation. Points apply between 18 and 44."
-          min={14} max={99} initial={answers.age} suffix="years" required
+          title={t('q.age.title')}
+          hint={t('q.age.hint')}
+          min={14} max={99} initial={answers.age} suffix={t('unit.years')} required
           onSubmit={(age) => onAnswer({ age })}
         />
       )
       break
     case 'english':
-      body = <ChoiceStep title="What is your English level?" options={ENGLISH} onPick={(english) => onAnswer({ english })} />
+      body = <ChoiceStep title={t('q.english.title')} options={ENGLISH} onPick={(english) => onAnswer({ english })} />
       break
     case 'experience':
       body = (
-        <NumberStep
-          title="How many years of experience do you have in your nominated occupation?"
-          hint="Whole years of skilled employment. Enter 0 if none."
-          min={0} max={60} initial={answers.experienceYears} suffix="years" required
-          onSubmit={(experienceYears) => onAnswer({ experienceYears })}
+        <ChoiceStep
+          title={t('q.exp.title')}
+          options={EXPERIENCE}
+          onPick={(experienceYears) => onAnswer({ experienceYears })}
         />
       )
       break
     case 'education':
-      body = <ChoiceStep title="What is your highest education level?" options={EDUCATION} onPick={(education) => onAnswer({ education })} />
+      body = <ChoiceStep title={t('q.edu.title')} options={EDUCATION} onPick={(education) => onAnswer({ education })} />
       break
     case 'skillLevel':
-      body = <ChoiceStep title="What is the skill level of your nominated occupation?" options={SKILL} onPick={(skillLevel) => onAnswer({ skillLevel })} />
+      body = <ChoiceStep title={t('q.skill.title')} options={SKILL} onPick={(skillLevel) => onAnswer({ skillLevel })} />
       break
     case 'partner':
-      body = <ChoiceStep title="Does your partner earn you partner skill points?" options={PARTNER} onPick={(partnerQualifies) => onAnswer({ partnerQualifies })} />
+      body = (
+        <ChoiceStep
+          title={t('q.partner.title')}
+          intro={<PartnerRequirements />}
+          options={PARTNER}
+          onPick={(partnerQualifies) => onAnswer({ partnerQualifies })}
+        />
+      )
       break
     case 'earnings':
       body = (
         <NumberStep
-          title="What is your annual earnings from current skilled employment in Victoria?"
-          hint="Before tax, in AUD. Points start at $80,000. Leave blank or enter 0 if this does not apply."
-          min={0} max={10_000_000} initial={answers.annualEarnings} prefix="$" step={1000}
-          onSubmit={(annualEarnings) => onAnswer({ annualEarnings })}
-          submitLabel="See my score"
+          title={t('q.earn.title')}
+          hint={t('q.earn.hint')}
+          min={0} max={10_000_000} initial={answers.annualEarnings} prefix="$" required
+          // The offshore option sits above the field. Skipping autofocus keeps the keyboard from hiding it.
+          autoFocus={false}
+          onSubmit={(annualEarnings) => onAnswer({ annualEarnings, location: 'onshore' })}
+          submitLabel={t('q.earn.submit')}
+          alternative={{
+            label: t('q.earn.offshore'),
+            hint: t('q.earn.offshore.hint'),
+            onPick: () => onAnswer({ annualEarnings: 0, location: 'offshore' }),
+          }}
         />
       )
       break
   }
   return (
     <section>
-      <Progress index={index} />
+      <Progress index={index} total={total} />
       {body}
       {onBack && (
-        <button onClick={onBack} className="mt-8 text-sm text-stone-500 hover:text-stone-900">
-          Back
+        <button
+          onClick={onBack}
+          className="mt-4 -ml-3 inline-flex min-h-12 items-center px-3 text-sm text-stone-500 active:text-stone-900"
+        >
+          {t('common.back')}
         </button>
       )}
     </section>
   )
 }
+
+const CARD =
+  'min-h-16 rounded-xl border border-stone-200 bg-white px-5 py-4 text-left transition hover:border-accent hover:shadow-sm active:scale-[0.99] active:border-accent active:bg-indigo-50 focus-visible:outline-2 focus-visible:outline-accent'
 
 function Title({ children }: { children: React.ReactNode }) {
   return <h2 className="mb-6 text-2xl leading-snug font-semibold tracking-tight">{children}</h2>
@@ -211,21 +364,20 @@ function Title({ children }: { children: React.ReactNode }) {
 
 function ChoiceStep<T extends string | number | boolean>(props: {
   title: string
+  intro?: React.ReactNode
   options: Choice<T>[]
   onPick: (value: T) => void
 }) {
+  const { t } = useI18n()
   return (
     <>
       <Title>{props.title}</Title>
+      {props.intro}
       <div className="grid gap-3">
         {props.options.map((o) => (
-          <button
-            key={String(o.value)}
-            onClick={() => props.onPick(o.value)}
-            className="rounded-xl border border-stone-200 bg-white px-5 py-4 text-left transition hover:border-accent hover:shadow-sm focus-visible:outline-2 focus-visible:outline-accent"
-          >
-            <span className="block font-medium">{o.label}</span>
-            {o.hint && <span className="mt-0.5 block text-sm text-stone-500">{o.hint}</span>}
+          <button key={String(o.value)} onClick={() => props.onPick(o.value)} className={CARD}>
+            <span className="block font-medium">{t(o.label)}</span>
+            {o.hint && <span className="mt-0.5 block text-sm text-stone-500">{t(o.hint)}</span>}
           </button>
         ))}
       </div>
@@ -241,11 +393,14 @@ function NumberStep(props: {
   initial?: number
   prefix?: string
   suffix?: string
-  step?: number
   required?: boolean
   submitLabel?: string
+  autoFocus?: boolean
+  // Shown above the field, as its own option.
+  alternative?: { label: string; hint: string; onPick: () => void }
   onSubmit: (value: number) => void
 }) {
+  const { t } = useI18n()
   const [text, setText] = useState(props.initial !== undefined ? String(props.initial) : '')
   const value = text === '' ? (props.required ? NaN : 0) : Number(text)
   const valid = Number.isInteger(value) && value >= props.min && value <= props.max
@@ -258,18 +413,27 @@ function NumberStep(props: {
       }}
     >
       <Title>{props.title}</Title>
+      {props.alternative && (
+        <>
+          <button type="button" onClick={props.alternative.onPick} className={`${CARD} w-full`}>
+            <span className="block font-medium">{props.alternative.label}</span>
+            <span className="mt-0.5 block text-sm text-stone-500">{props.alternative.hint}</span>
+          </button>
+          <p className="my-4 text-center text-xs text-stone-400">{t('q.earn.or')}</p>
+        </>
+      )}
       <div className="flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-5 py-4 focus-within:border-accent">
         {props.prefix && <span className="text-stone-400">{props.prefix}</span>}
         <input
-          autoFocus
+          autoFocus={props.autoFocus ?? true}
+          type="text"
           inputMode="numeric"
-          type="number"
-          min={props.min}
-          max={props.max}
-          step={props.step ?? 1}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          className="w-full bg-transparent text-xl outline-none"
+          pattern="[0-9]*"
+          enterKeyHint={props.submitLabel ? 'done' : 'next'}
+          autoComplete="off"
+          value={props.prefix === '$' && text !== '' ? money.format(Number(text)) : text}
+          onChange={(e) => setText(e.target.value.replace(/\D/g, '').slice(0, 9))}
+          className="min-h-8 w-full bg-transparent text-2xl outline-none"
           aria-label={props.title}
         />
         {props.suffix && <span className="text-stone-400">{props.suffix}</span>}
@@ -278,95 +442,10 @@ function NumberStep(props: {
       <button
         type="submit"
         disabled={!valid}
-        className="mt-6 w-full rounded-xl bg-accent px-5 py-3 font-medium text-white transition enabled:hover:opacity-90 disabled:opacity-40"
+        className="mt-6 min-h-14 w-full rounded-xl bg-accent px-5 py-3 text-base font-medium text-white transition enabled:hover:opacity-90 enabled:active:opacity-80 disabled:opacity-40"
       >
-        {props.submitLabel ?? 'Continue'}
+        {props.submitLabel ?? t('common.continue')}
       </button>
     </form>
   )
-}
-
-function Results(props: { input: VptInput; save: SaveOutcome | 'saving' | null; onRestart: () => void }) {
-  const result = calculateVpt(props.input)
-  const earningsNote =
-    props.input.annualEarnings > 0 ? `$${money.format(props.input.annualEarnings)} a year` : 'Not claimed'
-
-  return (
-    <section>
-      <p className="text-sm text-stone-500">Your estimated Victorian Points Test score</p>
-      <p className="mt-1 flex items-baseline gap-2">
-        <span className="text-7xl font-semibold tracking-tight">{result.total}</span>
-        <span className="text-lg text-stone-400">of {result.max}</span>
-      </p>
-
-      <ul className="mt-10 grid gap-5">
-        {result.categories.map((c) => (
-          <li key={c.key}>
-            <div className="flex items-baseline justify-between text-sm">
-              <span className="font-medium">{c.label}</span>
-              <span className="tabular-nums text-stone-500">
-                {c.points} <span className="text-stone-300">/ {c.max}</span>
-              </span>
-            </div>
-            <div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-200">
-              <div
-                className="h-full rounded-full bg-accent transition-all duration-500"
-                style={{ width: `${(c.points / c.max) * 100}%` }}
-              />
-            </div>
-            {c.key === 'earnings' && <p className="mt-1 text-xs text-stone-400">{earningsNote}</p>}
-          </li>
-        ))}
-      </ul>
-
-      <SaveStatus save={props.save} />
-
-      <div className="mt-8 rounded-xl border border-dashed border-stone-300 bg-white/60 p-5">
-        <p className="font-medium">Insights and comparison</p>
-        <p className="mt-1 text-sm text-stone-500">
-          See your percentile against other candidates and which categories would move your score most. Coming soon.
-        </p>
-      </div>
-
-      <button
-        onClick={props.onRestart}
-        className="mt-8 w-full rounded-xl border border-stone-300 px-5 py-3 font-medium transition hover:bg-white"
-      >
-        Start over
-      </button>
-    </section>
-  )
-}
-
-function SaveStatus({ save }: { save: SaveOutcome | 'saving' | null }) {
-  const [copied, setCopied] = useState(false)
-  if (save === null) return null
-  if (save === 'saving') return <p className="mt-8 text-sm text-stone-400">Saving...</p>
-  if (save.status === 'saved') {
-    return (
-      <div className="mt-8 flex items-center justify-between gap-4 rounded-xl bg-white px-5 py-4 text-sm">
-        <span className="text-stone-500">Saved. Keep this link to return to your result.</span>
-        <button
-          className="font-medium text-accent"
-          onClick={() => {
-            navigator.clipboard.writeText(window.location.href).then(() => {
-              setCopied(true)
-              setTimeout(() => setCopied(false), 2000)
-            })
-          }}
-        >
-          {copied ? 'Copied' : 'Copy link'}
-        </button>
-      </div>
-    )
-  }
-  if (save.status === 'rate_limited') {
-    const minutes = Math.max(1, Math.ceil(save.retryAfter / 60))
-    return (
-      <p className="mt-8 rounded-xl bg-amber-50 px-5 py-4 text-sm text-amber-900">
-        You have saved several results recently. This score is not saved and has no shareable link. Try saving again in about {minutes} minute{minutes === 1 ? '' : 's'}.
-      </p>
-    )
-  }
-  return <p className="mt-8 text-sm text-stone-400">This result could not be saved, but your score above is correct.</p>
 }

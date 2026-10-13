@@ -2,11 +2,13 @@
 // Shared by the browser (instant results) and the edge function (server-side recompute before saving).
 // Keep this file dependency-free so both Vite and Deno can import it.
 
+export type Location = 'onshore' | 'offshore'
 export type EnglishLevel = 'competent' | 'proficient' | 'superior'
 export type EducationLevel = 'other' | 'bachelors' | 'masters' | 'phd'
 export type SkillLevel = 1 | 2 | 3
 
 export interface VptInput {
+  location: Location
   age: number
   english: EnglishLevel
   experienceYears: number
@@ -14,6 +16,13 @@ export interface VptInput {
   skillLevel: SkillLevel
   partnerQualifies: boolean
   annualEarnings: number
+}
+
+// What the wizard collects. Skill level and partner skills can be skipped, which turns the
+// score into a range. Only a fully resolved draft can be submitted to the pool.
+export interface VptDraft extends Omit<VptInput, 'skillLevel' | 'partnerQualifies'> {
+  skillLevel: SkillLevel | 'unsure'
+  partnerQualifies: boolean | 'unsure'
 }
 
 export type CategoryKey =
@@ -30,12 +39,20 @@ export interface CategoryScore {
   label: string
   points: number
   max: number
+  // False when the category cannot be claimed (for example Victorian earnings offshore).
+  applicable: boolean
 }
 
 export interface VptResult {
   total: number
   max: number
   categories: CategoryScore[]
+}
+
+// Single place that decides which categories count for each location.
+export function isApplicable(key: CategoryKey, location: Location): boolean {
+  if (key === 'earnings') return location === 'onshore'
+  return true
 }
 
 const AGE_POINTS: Record<number, number> = {
@@ -56,8 +73,9 @@ const ENGLISH_POINTS: Record<EnglishLevel, number> = {
   superior: 200,
 }
 
-// The published bands overlap ("1 year", "1-3 years", "3-5 years") and skip 5 to 6.
-// Whole years are resolved to the first matching band: 1 -> 20, 2-3 -> 40, 4-5 -> 60, 6-8 -> 80, 9+ -> 100.
+// experienceYears holds a band code chosen in the wizard, not literal years:
+// 0 none -> 0, 1 under 1 year -> 20, 2 for 1 to 3 -> 40, 4 for 3 to 5 -> 60, 6 for 6 to 8 -> 80, 9 for more than 8 -> 100.
+// Codes in between fall into the band below them, so older literal-year submissions score as before.
 export function experiencePoints(years: number): number {
   if (years >= 9) return 100
   if (years >= 6) return 80
@@ -100,7 +118,7 @@ export function earningsPoints(earnings: number): number {
 }
 
 export function calculateVpt(input: VptInput): VptResult {
-  const categories: CategoryScore[] = [
+  const rows: Omit<CategoryScore, 'applicable'>[] = [
     { key: 'age', label: 'Age', points: agePoints(input.age), max: 300 },
     { key: 'english', label: 'English language', points: ENGLISH_POINTS[input.english], max: 200 },
     { key: 'experience', label: 'Experience in nominated occupation', points: experiencePoints(input.experienceYears), max: 100 },
@@ -109,13 +127,47 @@ export function calculateVpt(input: VptInput): VptResult {
     { key: 'partner', label: "Partner's skill", points: partnerPoints(input.partnerQualifies), max: 50 },
     { key: 'earnings', label: 'Victorian skilled earnings', points: earningsPoints(input.annualEarnings), max: 150 },
   ]
+  const categories: CategoryScore[] = rows.map((row) => {
+    const applicable = isApplicable(row.key, input.location)
+    return { ...row, points: applicable ? row.points : 0, applicable }
+  })
+  const counted = categories.filter((c) => c.applicable)
   return {
-    total: categories.reduce((sum, c) => sum + c.points, 0),
-    max: categories.reduce((sum, c) => sum + c.max, 0),
+    total: counted.reduce((sum, c) => sum + c.points, 0),
+    max: counted.reduce((sum, c) => sum + c.max, 0),
     categories,
   }
 }
 
+export function unsureFields(draft: VptDraft): ('skillLevel' | 'partnerQualifies')[] {
+  const fields: ('skillLevel' | 'partnerQualifies')[] = []
+  if (draft.skillLevel === 'unsure') fields.push('skillLevel')
+  if (draft.partnerQualifies === 'unsure') fields.push('partnerQualifies')
+  return fields
+}
+
+// Returns null while any answer is still skipped.
+export function resolveDraft(draft: VptDraft): VptInput | null {
+  if (draft.skillLevel === 'unsure' || draft.partnerQualifies === 'unsure') return null
+  return draft as VptInput
+}
+
+// Lowest and highest score a draft can reach. Both are equal once every answer is known.
+export function calculateRange(draft: VptDraft): { low: VptResult; high: VptResult; exact: boolean } {
+  const low = calculateVpt({
+    ...draft,
+    skillLevel: draft.skillLevel === 'unsure' ? 3 : draft.skillLevel,
+    partnerQualifies: draft.partnerQualifies === 'unsure' ? false : draft.partnerQualifies,
+  })
+  const high = calculateVpt({
+    ...draft,
+    skillLevel: draft.skillLevel === 'unsure' ? 1 : draft.skillLevel,
+    partnerQualifies: draft.partnerQualifies === 'unsure' ? true : draft.partnerQualifies,
+  })
+  return { low, high, exact: unsureFields(draft).length === 0 }
+}
+
+const LOCATION: readonly string[] = ['onshore', 'offshore']
 const ENGLISH: readonly string[] = ['competent', 'proficient', 'superior']
 const EDUCATION: readonly string[] = ['other', 'bachelors', 'masters', 'phd']
 
@@ -125,6 +177,7 @@ export function parseVptInput(raw: unknown): VptInput | null {
   const r = raw as Record<string, unknown>
   const int = (v: unknown, min: number, max: number) =>
     typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max
+  if (typeof r.location !== 'string' || !LOCATION.includes(r.location)) return null
   if (!int(r.age, 14, 99)) return null
   if (typeof r.english !== 'string' || !ENGLISH.includes(r.english)) return null
   if (!int(r.experienceYears, 0, 60)) return null

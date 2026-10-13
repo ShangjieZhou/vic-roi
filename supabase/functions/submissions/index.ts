@@ -1,7 +1,10 @@
-// POST /submissions  body: VptInput -> { id }, rate limited per IP.
-// GET  /submissions?id=<uuid>        -> { input }
+// POST /submissions                body: { input: VptInput, occupation?: string }
+//                                  -> { id, insights }, rate limited per IP
+// GET  /submissions?id=<uuid>      -> { input, occupation, insights }
+// GET  /submissions?suggest=<text> -> { suggestions: [{ name, count }] }
 
 import { createClient } from 'npm:@supabase/supabase-js@2'
+import { normalizeOccupation } from '../_shared/insights.ts'
 import { calculateVpt, parseVptInput } from '../_shared/scoring.ts'
 
 const LIMIT = 5
@@ -37,28 +40,38 @@ async function hashIp(ip: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response(null, { headers: cors })
-
-  if (req.method === 'GET') {
-    const id = new URL(req.url).searchParams.get('id') ?? ''
-    if (!UUID.test(id)) return json({ error: 'invalid_id' }, 400)
-    const { data, error } = await db.from('submissions').select('input').eq('id', id).maybeSingle()
+async function handleGet(url: URL): Promise<Response> {
+  const suggest = url.searchParams.get('suggest')
+  if (suggest !== null) {
+    const occ = normalizeOccupation(suggest)
+    if (occ === 'invalid' || occ === null || occ.key.length < 2) return json({ suggestions: [] })
+    const { data, error } = await db.rpc('occupation_suggestions', { p_prefix: occ.key })
     if (error) return json({ error: 'lookup_failed' }, 500)
-    if (!data) return json({ error: 'not_found' }, 404)
-    return json({ input: data.input })
+    return json({ suggestions: data })
   }
 
-  if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
+  const id = url.searchParams.get('id') ?? ''
+  if (!UUID.test(id)) return json({ error: 'invalid_id' }, 400)
+  const { data, error } = await db.from('submissions').select('input, occupation, location').eq('id', id).maybeSingle()
+  if (error) return json({ error: 'lookup_failed' }, 500)
+  if (!data) return json({ error: 'not_found' }, 404)
+  const { data: insights, error: insightsError } = await db.rpc('get_insights', { p_id: id })
+  if (insightsError) return json({ error: 'lookup_failed' }, 500)
+  // The column wins so rows saved before location existed still load as onshore.
+  return json({ input: { ...data.input, location: data.location }, occupation: data.occupation, insights })
+}
 
-  let body: unknown
+async function handlePost(req: Request): Promise<Response> {
+  let body: { input?: unknown; occupation?: unknown }
   try {
     body = await req.json()
   } catch {
     return json({ error: 'invalid_json' }, 400)
   }
-  const input = parseVptInput(body)
+  const input = parseVptInput(body?.input)
   if (!input) return json({ error: 'invalid_input' }, 400)
+  const occupation = normalizeOccupation(body?.occupation)
+  if (occupation === 'invalid') return json({ error: 'invalid_occupation' }, 400)
 
   const { data: gate, error: gateError } = await db
     .rpc('check_rate_limit', {
@@ -78,9 +91,26 @@ Deno.serve(async (req) => {
   const result = calculateVpt(input)
   const { data, error } = await db
     .from('submissions')
-    .insert({ input, total: result.total, breakdown: result.categories })
+    .insert({
+      input,
+      location: input.location,
+      total: result.total,
+      breakdown: result.categories,
+      occupation: occupation?.name ?? null,
+      occupation_key: occupation?.key ?? null,
+    })
     .select('id')
     .single()
   if (error) return json({ error: 'save_failed' }, 500)
-  return json({ id: data.id }, 201)
+
+  const { data: insights, error: insightsError } = await db.rpc('get_insights', { p_id: data.id })
+  if (insightsError) return json({ error: 'insights_failed' }, 500)
+  return json({ id: data.id, insights }, 201)
+}
+
+Deno.serve((req) => {
+  if (req.method === 'OPTIONS') return new Response(null, { headers: cors })
+  if (req.method === 'GET') return handleGet(new URL(req.url))
+  if (req.method === 'POST') return handlePost(req)
+  return json({ error: 'method_not_allowed' }, 405)
 })

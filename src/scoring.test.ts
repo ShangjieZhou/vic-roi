@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   agePoints,
+  calculateRange,
   calculateVpt,
   earningsPoints,
   experiencePoints,
   parseVptInput,
+  resolveDraft,
+  type VptDraft,
 } from '../supabase/functions/_shared/scoring'
 
 describe('agePoints', () => {
@@ -31,7 +34,7 @@ describe('earningsPoints', () => {
 describe('calculateVpt', () => {
   it('scores the maximum at 950', () => {
     const r = calculateVpt({
-      age: 25, english: 'superior', experienceYears: 10, education: 'phd',
+      location: 'onshore', age: 25, english: 'superior', experienceYears: 10, education: 'phd',
       skillLevel: 1, partnerQualifies: true, annualEarnings: 200_000,
     })
     expect(r.total).toBe(950)
@@ -40,7 +43,7 @@ describe('calculateVpt', () => {
 
   it('sums a typical candidate with a per-category breakdown', () => {
     const r = calculateVpt({
-      age: 32, english: 'proficient', experienceYears: 5, education: 'masters',
+      location: 'onshore', age: 32, english: 'proficient', experienceYears: 5, education: 'masters',
       skillLevel: 1, partnerQualifies: false, annualEarnings: 0,
     })
     expect(r.categories.map((c) => [c.key, c.points])).toEqual([
@@ -51,8 +54,52 @@ describe('calculateVpt', () => {
   })
 })
 
+describe('offshore', () => {
+  const base = {
+    location: 'offshore' as const, age: 25, english: 'superior' as const, experienceYears: 10,
+    education: 'phd' as const, skillLevel: 1 as const, partnerQualifies: true, annualEarnings: 200_000,
+  }
+  it('drops Victorian earnings from the score and the maximum', () => {
+    const r = calculateVpt(base)
+    expect(r.max).toBe(800)
+    expect(r.total).toBe(800)
+    const earnings = r.categories.find((c) => c.key === 'earnings')!
+    expect(earnings).toMatchObject({ points: 0, applicable: false })
+  })
+  it('ignores any earnings value offshore', () => {
+    expect(calculateVpt({ ...base, annualEarnings: 0 }).total).toBe(calculateVpt(base).total)
+  })
+})
+
+describe('calculateRange', () => {
+  const draft: VptDraft = {
+    location: 'onshore', age: 30, english: 'proficient', experienceYears: 4, education: 'bachelors',
+    skillLevel: 'unsure', partnerQualifies: 'unsure', annualEarnings: 0,
+  }
+  it('spans the skipped answers', () => {
+    const { low, high, exact } = calculateRange(draft)
+    expect(exact).toBe(false)
+    expect(high.total - low.total).toBe(100)
+    expect(low.total).toBe(286 + 100 + 60 + 50)
+  })
+  it('widens by 50 for one skipped answer', () => {
+    const { low, high } = calculateRange({ ...draft, partnerQualifies: false })
+    expect(high.total - low.total).toBe(50)
+  })
+  it('is exact once everything is answered', () => {
+    const { low, high, exact } = calculateRange({ ...draft, skillLevel: 1, partnerQualifies: false })
+    expect(exact).toBe(true)
+    expect(low.total).toBe(high.total)
+  })
+  it('only resolves a fully answered draft', () => {
+    expect(resolveDraft(draft)).toBeNull()
+    expect(resolveDraft({ ...draft, skillLevel: 2, partnerQualifies: true })).not.toBeNull()
+  })
+})
+
 describe('parseVptInput', () => {
   const valid = {
+    location: 'onshore',
     age: 30, english: 'proficient', experienceYears: 3, education: 'bachelors',
     skillLevel: 1, partnerQualifies: false, annualEarnings: 90_000,
   }
@@ -61,6 +108,10 @@ describe('parseVptInput', () => {
     expect(parseVptInput({ ...valid, english: 'native' })).toBeNull()
     expect(parseVptInput({ ...valid, age: 30.5 })).toBeNull()
     expect(parseVptInput({ ...valid, skillLevel: 4 })).toBeNull()
+    expect(parseVptInput({ ...valid, location: 'overseas' })).toBeNull()
+    expect(parseVptInput({ ...valid, location: undefined })).toBeNull()
+    expect(parseVptInput({ ...valid, skillLevel: 'unsure' })).toBeNull()
+    expect(parseVptInput({ ...valid, partnerQualifies: 'unsure' })).toBeNull()
     expect(parseVptInput(null)).toBeNull()
   })
 })
