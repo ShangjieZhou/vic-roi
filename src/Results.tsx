@@ -33,7 +33,7 @@ import { Distribution } from './Distribution'
 import { Turnstile } from './Turnstile'
 
 // Each block of the analysis sits on its own slightly darker card, with the white cards inside it.
-const SECTION_CARD = 'rounded-2xl bg-stone-100 p-5'
+const SECTION_CARD = 'rounded-2xl bg-stone-100 p-3 sm:p-5'
 const SECTION_TITLE = 'text-xl font-semibold tracking-tight'
 
 export function Results(props: {
@@ -443,9 +443,9 @@ function Comparison({ insights }: { insights: Insights }) {
   return (
     <div className={SECTION_CARD}>
       <h3 className={SECTION_TITLE}>{t('cmp.title')}</h3>
-      <ul className="mt-3 grid gap-2">
+      <ul className="mt-2">
         {rows.map((row) => (
-          <li key={row.kind} className="rounded-xl bg-white px-4 py-3">
+          <li key={row.kind} className="border-t border-stone-200 py-3 first:border-t-0">
             <div className="flex items-center justify-between gap-4">
               <span className="min-w-0">
                 <span className="block text-sm font-medium">{label(row)}</span>
@@ -823,7 +823,7 @@ function SupportCard() {
 
   if (minimized) {
     return (
-      <section ref={ref} className="rounded-2xl border border-[#f28b50]/25 bg-[#fef8f5] px-5">
+      <section ref={ref} className="rounded-2xl border border-[#f28b50]/25 bg-[#fef8f5] px-4 sm:px-5">
         <button
           type="button"
           aria-expanded={false}
@@ -841,7 +841,7 @@ function SupportCard() {
   }
 
   return (
-    <section ref={ref} className="rounded-2xl border border-[#f28b50]/25 bg-[#fef8f5] p-6 text-stone-900">
+    <section ref={ref} className="rounded-2xl border border-[#f28b50]/25 bg-[#fef8f5] p-4 text-stone-900 sm:p-6">
       <div className="flex items-start justify-between gap-3">
         <h3 className="min-w-0 text-xl font-semibold tracking-tight text-[#d9672b] sm:text-2xl">{t('support.title')}</h3>
         <button

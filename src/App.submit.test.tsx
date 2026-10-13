@@ -1588,10 +1588,29 @@ describe('section cards and titles', () => {
     }
   })
 
-  it('keeps the white cards inside the darker ones', async () => {
+  it('keeps the white cards inside the darker ones, except the three ranking rows', async () => {
     await openFull(full)
+    // The score and median figures stay white cards.
+    expect(screen.getByText('Where you rank').parentElement!.querySelector('dl > div.bg-white')).not.toBeNull()
+    // The three ranking rows sit straight on the section card, split by thin lines.
     const ranking = screen.getByText('Your ranking').parentElement!
-    expect(ranking.querySelector('li.bg-white')).not.toBeNull()
+    const rows = ranking.querySelectorAll('ul > li')
+    expect(rows).toHaveLength(3)
+    for (const row of rows) {
+      expect(row.className).not.toContain('bg-white')
+      expect(row.className).not.toContain('px-4')
+      expect(row.className).toContain('border-stone-200')
+    }
+    expect(rows[0].className).toContain('first:border-t-0')
+  })
+
+  it('uses less padding on a phone so the content has more room', async () => {
+    await openFull(full)
+    for (const title of ['Where you rank', 'Your ranking', 'Your score breakdown', 'Your score in each section', 'Top occupations']) {
+      const card = screen.getByText(title).parentElement!.className
+      expect(card, title).toContain('p-3')
+      expect(card, title).toContain('sm:p-5')
+    }
   })
 
   it('bolds the median score under each section chart', async () => {
