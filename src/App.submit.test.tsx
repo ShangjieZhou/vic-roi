@@ -495,6 +495,221 @@ describe('the analysis page', () => {
   })
 })
 
+// A pool big enough to rank, with the occupation group, histograms and top occupations the new sections use.
+const hist96 = (counts: Record<number, number>) => Array.from({ length: 96 }, (_, i) => counts[i] ?? 0)
+const full: Insights = {
+  ...withCharts,
+  total: 546,
+  overall: {
+    ...withCharts.overall, n: 40, percentile: 62, median: 530, mean: 535, meanPercentile: 58,
+    scoreHist: hist96({ 50: 10, 54: 20, 58: 10 }),
+  },
+  locationGroup: { n: 35, percentile: 60, median: 535, scoreHist: hist96({ 50: 10, 54: 15, 58: 10 }) },
+  occupation: {
+    name: 'Software engineer', code: '261313', level: 4, prefix: '2613',
+    n: 8, percentile: 80, median: 560, mean: 555, meanPercentile: 70,
+    scoreHist: hist96({ 54: 4, 58: 4 }),
+    categoryPercentile: { age: 90, english: 70, experience: 55, education: 44, skillLevel: 66, partner: 50, earnings: 77 },
+    categoryDist: {
+      age: [{ points: 286, count: 2 }, { points: 300, count: 6 }],
+      english: [{ points: 100, count: 3 }, { points: 200, count: 5 }],
+      experience: [{ points: 60, count: 4 }, { points: 100, count: 4 }],
+      education: [{ points: 50, count: 2 }, { points: 75, count: 6 }],
+      skillLevel: [{ points: 0, count: 1 }, { points: 50, count: 7 }],
+      partner: [{ points: 0, count: 6 }, { points: 50, count: 2 }],
+      earnings: [{ points: 0, count: 3 }, { points: 103, count: 5 }],
+    },
+  },
+  topOccupations: [
+    { code: '261313', name: 'Software engineer', n: 10, median: 560 },
+    { code: '254412', name: 'Registered nurse (aged care)', n: 6, median: 480 },
+    { code: '221111', name: 'Accountant (general)', n: 4, median: 500 },
+  ],
+}
+
+const openFull = async (insights: Insights, lang: 'en' | 'zh' = 'en') => {
+  if (lang === 'zh') localStorage.setItem('vpt-lang', 'zh')
+  vi.mocked(api.loadSubmission).mockResolvedValue({ input: INPUT, submission: submission(insights) })
+  addToHistory(entry(ID))
+  renderApp()
+  openHistory(lang === 'zh')
+  fireEvent.click(screen.getByText(lang === 'zh' ? '546 分' : '546 points'))
+  await screen.findByText(lang === 'zh' ? '您的位置' : 'Where you rank')
+}
+
+describe('distribution under each ranking', () => {
+  it('draws a graph for each of the three rankings', async () => {
+    await openFull(full)
+    expect(screen.getAllByRole('img', { name: /Where your score of 546 sits among/ })).toHaveLength(3)
+    expect(screen.getByRole('img', { name: /among 40 candidates/ })).toBeTruthy()
+    expect(screen.getByRole('img', { name: /among 8 candidates/ })).toBeTruthy()
+    expect(screen.getByRole('img', { name: /among 35 candidates/ })).toBeTruthy()
+  })
+
+  it('shows dots for the small occupation group and a curve for the large ones', async () => {
+    await openFull(full)
+    const label = (n: number) => screen.getByRole('img', { name: new RegExp(`among ${n} candidates`) })
+    expect(label(8).querySelector('path')).toBeNull()
+    expect(label(40).querySelector('path')).not.toBeNull()
+  })
+
+  it('draws no graph for a group the server sent no histogram for', async () => {
+    await openFull({ ...full, locationGroup: { n: 35, percentile: 60, median: 535 } })
+    expect(screen.getAllByRole('img', { name: /Where your score of 546 sits among/ })).toHaveLength(2)
+  })
+
+  it('is in Chinese', async () => {
+    await openFull(full, 'zh')
+    expect(screen.getAllByRole('img', { name: /您的 546 分在/ }).length).toBe(3)
+  })
+})
+
+describe('occupation group label', () => {
+  it('names a wider group as similar occupations with its ANZSCO prefix', async () => {
+    await openFull(full)
+    expect(screen.getByText('Similar to Software engineer (ANZSCO 2613)')).toBeTruthy()
+  })
+
+  it('uses the plain occupation name when the group is the exact occupation', async () => {
+    await openFull({ ...full, occupation: { ...full.occupation!, level: 6, prefix: '261313' } })
+    expect(screen.getAllByText('Software engineer').length).toBeGreaterThan(0)
+    expect(screen.queryByText(/Similar to/)).toBeNull()
+  })
+
+  it('is in Chinese', async () => {
+    await openFull(full, 'zh')
+    expect(screen.getByText('与软件工程师（Software engineer）相近（ANZSCO 2613）')).toBeTruthy()
+  })
+})
+
+describe('score bars show how many candidates', () => {
+  it('prints the count above the candidate\'s own bar', async () => {
+    await openFull(full)
+    const mine = screen.getByTitle('4 candidates at 286 points')
+    expect(mine.previousElementSibling?.textContent).toBe('4')
+  })
+
+  it('shows the count for a tapped bar, and clears it when tapped again', async () => {
+    await openFull(full)
+    expect(screen.queryByText('8 candidates at 300 points')).toBeNull()
+    const bar = screen.getByTitle('8 candidates at 300 points')
+    fireEvent.click(bar)
+    expect(screen.getByText('8 candidates at 300 points', { selector: 'p' })).toBeTruthy()
+    expect(bar.getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(bar)
+    expect(screen.queryByText('8 candidates at 300 points', { selector: 'p' })).toBeNull()
+  })
+
+  it('marks the candidate\'s own bar when it is tapped', async () => {
+    await openFull(full)
+    fireEvent.click(screen.getByTitle('4 candidates at 286 points'))
+    expect(screen.getByText(/4 candidates at 286 points · Your score/)).toBeTruthy()
+  })
+
+  it('shows a bar for a score nobody has with a count of zero', async () => {
+    await openFull(full)
+    fireEvent.click(screen.getAllByTitle('0 candidates at 16 points')[0])
+    expect(screen.getByText('0 candidates at 16 points', { selector: 'p' })).toBeTruthy()
+  })
+})
+
+describe('comparing sections with similar occupations', () => {
+  const pctLine = (text: string) => screen.getByText((_, el) => el?.tagName === 'P' && el.textContent === text)
+
+  it('starts on all candidates and says how many', async () => {
+    await openFull(full)
+    expect(screen.getByRole('button', { name: 'All candidates' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByText('Compared with 40 candidates')).toBeTruthy()
+    expect(pctLine('Top 22% · Median 300 | Ages 20 to 29')).toBeTruthy()
+  })
+
+  it('switches every chart to the similar occupation group', async () => {
+    await openFull(full)
+    fireEvent.click(screen.getByRole('button', { name: 'Similar occupation' }))
+    expect(screen.getByRole('button', { name: 'Similar occupation' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByText('Similar to Software engineer (ANZSCO 2613). Compared with 8 candidates', { exact: false })).toBeTruthy()
+    // Age in this group: 90th percentile, median 300.
+    expect(pctLine('Top 10% · Median 300 | Ages 20 to 29')).toBeTruthy()
+    // Partner: 50th percentile, median 0.
+    expect(pctLine('Top 50% · Median 0 | No partner points')).toBeTruthy()
+  })
+
+  it('switches back to all candidates', async () => {
+    await openFull(full)
+    fireEvent.click(screen.getByRole('button', { name: 'Similar occupation' }))
+    fireEvent.click(screen.getByRole('button', { name: 'All candidates' }))
+    expect(screen.getByText('Compared with 40 candidates')).toBeTruthy()
+  })
+
+  it('warns that a small group is a rough guide', async () => {
+    await openFull({ ...full, occupation: { ...full.occupation!, n: 3 } })
+    expect(screen.queryByText('A small group so far, so treat this as a rough guide.')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Similar occupation' }))
+    expect(screen.getByText('A small group so far, so treat this as a rough guide.')).toBeTruthy()
+  })
+
+  it('has no switch without an occupation', async () => {
+    await openFull({ ...full, occupation: null })
+    expect(screen.queryByRole('button', { name: 'Similar occupation' })).toBeNull()
+  })
+
+  it('has no switch when the occupation group is too small to rank', async () => {
+    await openFull({ ...full, occupation: { name: 'Software engineer', code: '261313', n: 1, level: 6, prefix: '261313' } })
+    expect(screen.queryByRole('button', { name: 'Similar occupation' })).toBeNull()
+  })
+
+  it('is in Chinese', async () => {
+    await openFull(full, 'zh')
+    expect(screen.getByRole('button', { name: '相近职业' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '相近职业' }))
+    expect(screen.getByText(/对比对象：8 位候选人/)).toBeTruthy()
+  })
+})
+
+describe('top occupations', () => {
+  it('lists the most common occupations with counts, share and median', async () => {
+    await openFull(full)
+    expect(screen.getByText('Top occupations')).toBeTruthy()
+    const items = screen.getAllByRole('listitem').filter((li) => li.textContent?.includes('of everyone'))
+    expect(items).toHaveLength(3)
+    expect(items[0].textContent).toContain('Software engineer')
+    expect(items[0].textContent).toContain('10 candidates, 25% of everyone')
+    expect(items[0].textContent).toContain('Median 560')
+    expect(items[1].textContent).toContain('Registered nurse (aged care)')
+    expect(items[1].textContent).toContain('6 candidates, 15% of everyone')
+  })
+
+  it('scales each bar to the biggest group', async () => {
+    await openFull(full)
+    const bars = [...document.querySelectorAll('ol .h-full')]
+    expect(bars.map((b) => b.getAttribute('style'))).toEqual(['width: 100%;', 'width: 60%;', 'width: 40%;'])
+  })
+
+  it('tags the candidate\'s own occupation', async () => {
+    await openFull(full)
+    const mine = screen.getAllByRole('listitem').find((li) => li.textContent?.includes('Software engineer') && li.textContent.includes('of everyone'))!
+    expect(mine.textContent).toContain('You')
+    const other = screen.getAllByRole('listitem').find((li) => li.textContent?.includes('Accountant'))!
+    expect(other.textContent).not.toMatch(/\bYou\b/)
+  })
+
+  it('is left out when no occupation has two candidates yet', async () => {
+    await openFull({ ...full, topOccupations: [] })
+    expect(screen.queryByText('Top occupations')).toBeNull()
+  })
+
+  it('is left out when the server does not send it', async () => {
+    await openFull({ ...full, topOccupations: undefined })
+    expect(screen.queryByText('Top occupations')).toBeNull()
+  })
+
+  it('shows Chinese names with the English title beside them', async () => {
+    await openFull(full, 'zh')
+    expect(screen.getByText('热门职业')).toBeTruthy()
+    expect(screen.getAllByText(/软件工程师（Software engineer）/).length).toBeGreaterThan(0)
+  })
+})
+
 describe('support card', () => {
   afterEach(() => vi.unstubAllEnvs())
 

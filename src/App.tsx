@@ -8,6 +8,7 @@ import type {
 import { EARNINGS_INPUT_MAX } from '../supabase/functions/_shared/scoring'
 import { loadSubmission, type Submission } from './api'
 import { money } from './format'
+import { EnglishRequirementsLink } from './EnglishRequirements'
 import { HistoryList } from './History'
 import { useI18n, type Key, type Lang } from './i18n'
 import { PartnerRequirements } from './PartnerRequirements'
@@ -288,7 +289,14 @@ function Question(props: {
       )
       break
     case 'english':
-      body = <ChoiceStep title={t('q.english.title')} options={ENGLISH} onPick={(english) => onAnswer({ english })} />
+      body = (
+        <ChoiceStep
+          title={t('q.english.title')}
+          intro={<EnglishRequirementsLink initial={answers.english} />}
+          options={ENGLISH}
+          onPick={(english) => onAnswer({ english })}
+        />
+      )
       break
     case 'experience':
       body = (

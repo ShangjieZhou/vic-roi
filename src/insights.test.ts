@@ -36,6 +36,9 @@ describe('isRanked', () => {
   })
 })
 
+// The fields every test below cares about. The median, histogram and group level are checked on their own.
+const brief = (rows: ReturnType<typeof comparisonRows>) => rows.map(({ kind, n, percentile }) => ({ kind, n, percentile }))
+
 describe('comparisonRows', () => {
   const base: Insights = {
     total: 500,
@@ -46,7 +49,7 @@ describe('comparisonRows', () => {
   }
 
   it('shows the percentile in exactly three contexts: all candidates, occupation and location', () => {
-    expect(comparisonRows(base)).toEqual([
+    expect(brief(comparisonRows(base))).toEqual([
       { kind: 'all', n: 23, percentile: 54 },
       { kind: 'occupation', n: 9, percentile: 93 },
       { kind: 'location', n: 15, percentile: 60 },
@@ -54,22 +57,22 @@ describe('comparisonRows', () => {
   })
 
   it('shows a narrower group with as few as two candidates', () => {
-    const rows = comparisonRows({
+    const rows = brief(comparisonRows({
       ...base,
       locationGroup: { n: 2, percentile: 75, median: 500 },
       occupation: { name: 'Software engineer', code: '261313', n: 2, percentile: 75, median: 500 },
-    })
+    }))
     expect(rows.find((r) => r.kind === 'occupation')).toEqual({ kind: 'occupation', n: 2, percentile: 75 })
     expect(rows.find((r) => r.kind === 'location')).toEqual({ kind: 'location', n: 2, percentile: 75 })
   })
 
   it('keeps an occupation the candidate is alone in, without a rank', () => {
-    const rows = comparisonRows({ ...base, occupation: { name: 'Software engineer', code: '261313', n: 1 } })
+    const rows = brief(comparisonRows({ ...base, occupation: { name: 'Software engineer', code: '261313', n: 1 } }))
     expect(rows.find((r) => r.kind === 'occupation')).toEqual({ kind: 'occupation', n: 1, percentile: undefined })
   })
 
   it('leaves out the location row when every candidate is in the same location', () => {
-    const rows = comparisonRows({ ...base, locationGroup: { n: 23, percentile: 54, median: 500 } })
+    const rows = brief(comparisonRows({ ...base, locationGroup: { n: 23, percentile: 54, median: 500 } }))
     expect(rows.map((r) => r.kind)).toEqual(['all', 'occupation'])
   })
 
@@ -82,8 +85,35 @@ describe('comparisonRows', () => {
   })
 
   it('copes with a server that sends no location group or occupation', () => {
-    expect(comparisonRows({ total: 1, location: 'onshore', overall: { n: 23, percentile: 50, median: 500 }, occupation: null })).toEqual([
+    expect(brief(comparisonRows({ total: 1, location: 'onshore', overall: { n: 23, percentile: 50, median: 500 }, occupation: null }))).toEqual([
       { kind: 'all', n: 23, percentile: 50 },
     ])
+  })
+})
+
+describe('comparisonRows extras', () => {
+  const hist = Array.from({ length: 96 }, (_, i) => (i === 50 ? 12 : 0))
+  const insights: Insights = {
+    total: 505,
+    location: 'onshore',
+    overall: { n: 12, percentile: 54, median: 500, scoreHist: hist },
+    occupation: { name: 'Software engineer', code: '261313', n: 6, percentile: 60, median: 510, level: 4, prefix: '2613', scoreHist: hist },
+  }
+
+  it('passes the median and histogram on for the distribution graph', () => {
+    const [all] = comparisonRows(insights)
+    expect(all.median).toBe(500)
+    expect(all.hist).toBe(hist)
+  })
+
+  it('reports how wide the occupation group is', () => {
+    const occ = comparisonRows(insights).find((r) => r.kind === 'occupation')
+    expect(occ?.level).toBe(4)
+    expect(occ?.prefix).toBe('2613')
+  })
+
+  it('has no histogram for a group too small to rank', () => {
+    const rows = comparisonRows({ ...insights, occupation: { name: 'x', code: '261313', n: 1, level: 6, prefix: '261313' } })
+    expect(rows.find((r) => r.kind === 'occupation')?.hist).toBeUndefined()
   })
 })

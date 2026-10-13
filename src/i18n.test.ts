@@ -39,7 +39,7 @@ describe('translations', () => {
 
   it('keep the scoring-critical wording faithful', () => {
     expect(translate('zh', 'partner.req1')).toContain('SkillSelect')
-    expect(translate('zh', 'opt.english.superior.hint')).toContain('PTE 79')
+    expect(translate('zh', 'opt.english.superior.hint')).not.toContain('PTE 79') // PTE no longer has one score
     expect(translate('zh', 'opt.english.superior.hint')).toContain('雅思 8')
     expect(translate('zh', 'q.earn.offshore.hint')).toContain('0 分')
     expect(translate('en', 'q.earn.offshore.hint')).toContain('0 income points')

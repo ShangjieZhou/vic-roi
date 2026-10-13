@@ -21,6 +21,16 @@ export interface PoolStats {
   categoryPercentile?: Partial<Record<CategoryKey, number>>
   // How many candidates scored each value in each section, lowest value first.
   categoryDist?: Partial<Record<CategoryKey, { points: number; count: number }[]>>
+  // How many candidates have a total in each 10-point band: 96 bands, from 0 to 9 up to 950.
+  scoreHist?: number[]
+}
+
+// One of the occupations with the most candidates.
+export interface TopOccupation {
+  code: string
+  name: string
+  n: number
+  median: number
 }
 
 export interface Insights {
@@ -28,7 +38,11 @@ export interface Insights {
   location: Location
   overall: PoolStats
   // code is the ANZSCO code when the occupation was picked from the list, and null or absent for free text.
-  occupation: (PoolStats & { name: string; code?: string | null }) | null
+  // level is how many digits of the code the group shares (6 is the exact occupation, 4, 3 or 2 a wider group), and
+  // prefix is that part of the code. Both are null or absent for free text.
+  occupation: (PoolStats & { name: string; code?: string | null; level?: number | null; prefix?: string | null }) | null
+  // The listed occupations with the most candidates, most common first.
+  topOccupations?: TopOccupation[]
   // Candidates in the same location only.
   locationGroup?: PoolStats | null
 }
@@ -56,6 +70,12 @@ export interface ComparisonRow {
   n: number
   // Undefined when this candidate is the only one in the group so far.
   percentile?: number
+  median?: number
+  // Candidates per 10-point band of the total, for the distribution graph.
+  hist?: number[]
+  // For the occupation row: how wide the group is. See Insights.occupation.
+  level?: number | null
+  prefix?: string | null
 }
 
 // The three groups a candidate's percentile is shown for: all candidates, their occupation and their location.
@@ -63,11 +83,20 @@ export interface ComparisonRow {
 // out when they hold exactly the same candidates as the overall row.
 export function comparisonRows(insights: Insights): ComparisonRow[] {
   const rows: ComparisonRow[] = []
-  const add = (kind: ComparisonKind, stats: PoolStats) =>
-    rows.push({ kind, n: stats.n, percentile: isRanked(stats) ? stats.percentile : undefined })
+  const add = (kind: ComparisonKind, stats: PoolStats, extra: Partial<ComparisonRow> = {}) =>
+    rows.push({
+      kind,
+      n: stats.n,
+      percentile: isRanked(stats) ? stats.percentile : undefined,
+      median: isRanked(stats) ? stats.median : undefined,
+      hist: isRanked(stats) ? stats.scoreHist : undefined,
+      ...extra,
+    })
 
   if (isRanked(insights.overall)) add('all', insights.overall)
-  if (insights.occupation) add('occupation', insights.occupation)
+  if (insights.occupation) {
+    add('occupation', insights.occupation, { level: insights.occupation.level, prefix: insights.occupation.prefix })
+  }
   const { locationGroup } = insights
   if (locationGroup && locationGroup.n !== insights.overall.n) add('location', locationGroup)
   return rows
