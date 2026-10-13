@@ -309,7 +309,7 @@ function InsightsPanel(props: {
   const { overall } = insights
 
   return (
-    <div className="mt-10 grid gap-8">
+    <div className="mt-10 grid gap-8 [&>*]:min-w-0">
       {isRanked(overall) ? (
         <>
           <PercentileBar insights={insights} />
@@ -658,7 +658,7 @@ function ScoreBars({ dist, mine, all }: { dist: { points: number; count: number 
           const count = counts.get(v) ?? 0
           const text = t('sec.bar', { count, points: v })
           return (
-            <div key={v} className="flex flex-1 flex-col items-center justify-end">
+            <div key={v} className="flex min-w-0 flex-1 flex-col items-center justify-end">
               <span
                 data-count
                 className={`mb-0.5 text-[10px] leading-none tabular-nums ${sideways} ${
@@ -684,7 +684,7 @@ function ScoreBars({ dist, mine, all }: { dist: { points: number; count: number 
         {values.map((v) => (
           <span
             key={v}
-            className={`flex-1 text-center ${sideways} ${v === mine ? 'font-semibold text-accent' : ''}`}
+            className={`min-w-0 flex-1 text-center leading-none ${sideways} ${v === mine ? 'font-semibold text-accent' : ''}`}
           >
             {v}
           </span>
@@ -843,7 +843,7 @@ function SupportCard() {
   return (
     <section ref={ref} className="rounded-2xl border border-[#f28b50]/25 bg-[#fef8f5] p-6 text-stone-900">
       <div className="flex items-start justify-between gap-3">
-        <h3 className="text-2xl font-semibold tracking-tight text-[#d9672b]">{t('support.title')}</h3>
+        <h3 className="min-w-0 text-xl font-semibold tracking-tight text-[#d9672b] sm:text-2xl">{t('support.title')}</h3>
         <button
           type="button"
           aria-expanded
@@ -851,7 +851,7 @@ function SupportCard() {
             trackSupport('coffee_minimized')
             change(true)
           }}
-          className="-mt-2 -mr-3 flex min-h-11 shrink-0 items-center gap-1 px-3 text-xs font-medium text-stone-500 active:text-stone-900"
+          className="-mt-2 -mr-2 flex min-h-11 shrink-0 items-center gap-1 px-2 text-xs font-medium text-stone-500 active:text-stone-900"
         >
           {t('support.minimize')}
           <ChevronIcon open />

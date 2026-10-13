@@ -1609,3 +1609,25 @@ describe('section cards and titles', () => {
     for (const m of within(panel).getAllByText(/^Median score: \d+$/)) expect(m.className).toContain('font-bold')
   })
 })
+
+describe('narrow screens', () => {
+  it('lets every block of the analysis shrink to the screen instead of stretching the page', async () => {
+    await openFull(full)
+    const column = screen.getByText('Where you rank').closest('section')!.parentElement!
+    expect(column.className).toContain('[&>*]:min-w-0')
+  })
+
+  it('lets the support card title shrink beside its Minimize button', async () => {
+    await openFull(full)
+    expect(screen.getByText('Found it helpful?').className).toContain('min-w-0')
+  })
+
+  it('lets the section chart columns shrink so a chart with many bars fits a small phone', async () => {
+    await openFull(full)
+    const column = screen.getByTitle('8 candidates at 300 points').parentElement!
+    expect(column.className).toContain('min-w-0')
+    const label = [...document.querySelectorAll('span')].find((e) => e.textContent === '300' && e.className.includes('rotate-180'))!
+    expect(label.className).toContain('min-w-0')
+    expect(label.className).toContain('leading-none')
+  })
+})
