@@ -118,6 +118,13 @@ export const zh: Record<Key, Msg> = {
 
   'ins.pct': '前{p}%',
   'ins.pctNote': '“前xx%”表示得分高于您的候选人所占比例，加上与您同分者的一半。当大多数候选人在某一项上得分相同时，该数值会接近 50%。',
+  'support.title': '觉得有帮助吗？',
+  'support.body':
+    '这个计算器由我独自开发，并保持免费。如果它帮您规划了下一步，欢迎请我喝杯咖啡。多少都是心意，打赏完全自愿，也不会解锁任何额外内容。',
+  'support.feedbackNote': '也欢迎提交反馈或报告错误 🧡',
+  'support.coffee': '请我喝杯咖啡',
+  'support.feedback': '提交反馈',
+  'support.note': '打赏通过 Buy Me a Coffee 处理，适用其自身的隐私政策。',
   'ins.keepLink': '请保存此链接，以便日后查看您的结果。',
   'ins.share': '分享',
   'ins.copyLink': '复制链接',

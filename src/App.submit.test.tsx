@@ -495,6 +495,60 @@ describe('the analysis page', () => {
   })
 })
 
+describe('support card', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  const open = async (insights: Insights, lang: 'en' | 'zh' = 'en') => {
+    if (lang === 'zh') localStorage.setItem('vpt-lang', 'zh')
+    vi.mocked(api.loadSubmission).mockResolvedValue({ input: INPUT, submission: submission(insights) })
+    addToHistory(entry(ID))
+    renderApp()
+    openHistory(lang === 'zh')
+    fireEvent.click(screen.getByText(lang === 'zh' ? '546 分' : '546 points'))
+    await screen.findByText(lang === 'zh' ? '您的位置' : 'Where you rank')
+  }
+
+  it('offers a tip at the bottom of the analysis, linking to the Buy Me a Coffee page', async () => {
+    vi.stubEnv('VITE_FEEDBACK_URL', '')
+    await open(withCharts)
+    const coffee = screen.getByText('Buy me a coffee').closest('a')!
+    expect(coffee.getAttribute('href')).toBe('https://buymeacoffee.com/shangjie')
+    expect(coffee.getAttribute('target')).toBe('_blank')
+    expect(coffee.getAttribute('rel')).toContain('noopener')
+    expect(screen.getByText(/Any amount is appreciated/)).toBeTruthy()
+    expect(screen.queryByText('Send feedback')).toBeNull()
+    // It comes after the share link and before the disclaimer.
+    const share = screen.getByText('Keep this link to return to your result.')
+    expect(share.compareDocumentPosition(coffee) & 4).toBe(4)
+  })
+
+  it('shows a feedback button once a form link is set', async () => {
+    vi.stubEnv('VITE_FEEDBACK_URL', 'https://forms.gle/example')
+    await open(withCharts)
+    expect(screen.getByText('Send feedback').closest('a')!.getAttribute('href')).toBe('https://forms.gle/example')
+  })
+
+  it('is not shown under the score before submitting', () => {
+    reachSubmitCard()
+    expect(screen.queryByText('Found it helpful?')).toBeNull()
+  })
+
+  it('stays hidden while the comparison is still locked', async () => {
+    vi.mocked(api.loadSubmission).mockResolvedValue({ input: INPUT, submission: submission(waiting(4)) })
+    addToHistory(entry(ID))
+    renderApp()
+    openHistory()
+    fireEvent.click(screen.getByText('546 points'))
+    await screen.findByText('Your score is saved')
+    expect(screen.queryByText('Buy me a coffee')).toBeNull()
+  })
+
+  it('is shown in Chinese', async () => {
+    await open(withCharts, 'zh')
+    expect(screen.getByText('请我喝杯咖啡')).toBeTruthy()
+  })
+})
+
 describe('choosing an occupation when submitting', () => {
   const okResult = () =>
     vi.mocked(api.submitScore).mockResolvedValue({ status: 'ok', replaced: [], submission: submission(waiting(3)) })

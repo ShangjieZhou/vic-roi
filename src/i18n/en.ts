@@ -124,6 +124,13 @@ export const en = {
   'ins.pct': 'Top {p}%',
   'ins.pctNote':
     'Top xx% is the share of candidates who scored higher than you, plus half of those who tied. When most candidates share the same points in a section, that score sits near the top 50%.',
+  'support.title': 'Found it helpful?',
+  'support.body':
+    'I built this calculator on my own and keep it free. If it helped you plan your next step, you are welcome to buy me a coffee. Any amount is appreciated, and tips are optional and unlock nothing extra.',
+  'support.feedbackNote': 'Feedback and bug reports help too 🧡',
+  'support.coffee': 'Buy me a coffee',
+  'support.feedback': 'Send feedback',
+  'support.note': 'Tips go through Buy Me a Coffee, which has its own privacy policy.',
   'ins.keepLink': 'Keep this link to return to your result.',
   'ins.share': 'Share',
   'ins.copyLink': 'Copy link',

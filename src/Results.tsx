@@ -18,9 +18,9 @@ import {
   type VptResult,
 } from '../supabase/functions/_shared/scoring'
 import { submitScore, type OccupationChoice, type Submission } from './api'
-import { turnstileSiteKey } from './config'
+import { COFFEE_URL, feedbackUrl, turnstileSiteKey } from './config'
 import { money } from './format'
-import { LockIcon } from './icons'
+import { CoffeeIcon, LockIcon } from './icons'
 import { useI18n, type Key } from './i18n'
 import { OccupationPicker } from './OccupationPicker'
 import { occupationDisplayName } from './occupationSearch'
@@ -318,6 +318,8 @@ function InsightsPanel(props: {
 
       <ShareLink />
 
+      {isRanked(overall) && <SupportCard />}
+
       <p className="text-xs leading-relaxed text-stone-400">{t('ins.disclaimer')}</p>
     </div>
   )
@@ -561,6 +563,43 @@ function ScoreBars({
         ))}
       </div>
     </div>
+  )
+}
+
+// An optional tip and a feedback link, shown once the visitor has their analysis. Nothing is unlocked by paying.
+function SupportCard() {
+  const { t } = useI18n()
+  const feedback = feedbackUrl()
+  const button =
+    'inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold transition active:scale-[0.98]'
+  return (
+    <section className="rounded-2xl border border-[#f28b50]/25 bg-[#fef8f5] p-6 text-stone-900">
+      <h3 className="text-2xl font-semibold tracking-tight text-[#d9672b]">{t('support.title')}</h3>
+      <p className="mt-2 max-w-md text-sm leading-relaxed text-stone-700">{t('support.body')}</p>
+      <p className="mt-2 max-w-md text-sm leading-relaxed text-stone-700">{t('support.feedbackNote')}</p>
+      <div className="mt-5 flex flex-wrap gap-3">
+        <a
+          href={COFFEE_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`${button} bg-[#f28b50] text-stone-900 shadow-sm hover:bg-[#ee7d3d]`}
+        >
+          <CoffeeIcon className="size-5" />
+          {t('support.coffee')}
+        </a>
+        {feedback && (
+          <a
+            href={feedback}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`${button} border-2 border-[#f28b50] text-[#b9531f] hover:bg-[#f28b50]/10`}
+          >
+            {t('support.feedback')}
+          </a>
+        )}
+      </div>
+      <p className="mt-4 text-xs leading-relaxed text-stone-500">{t('support.note')}</p>
+    </section>
   )
 }
 
