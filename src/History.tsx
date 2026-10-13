@@ -1,22 +1,8 @@
 import { useId, useState } from 'react'
+import { ChevronIcon } from './icons'
 import { useI18n, type Key } from './i18n'
 import { occupationDisplayName } from './occupationSearch'
 import { timeAgo, type HistoryEntry } from './saved'
-
-function Chevron({ open }: { open: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      aria-hidden="true"
-      className={`size-4 shrink-0 text-stone-500 transition-transform ${open ? 'rotate-180' : ''}`}
-    >
-      <path d="m5 7.5 5 5 5-5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
 
 // The visitor's submission on this device, expanded by default and can be collapsed. Each row opens that
 // result with its full analysis.
@@ -38,7 +24,7 @@ export function HistoryList(props: {
         className="flex min-h-14 w-full items-center justify-between gap-3 text-left"
       >
         <span className="text-base font-semibold tracking-tight">{t('hist.title')}</span>
-        <Chevron open={open} />
+        <ChevronIcon open={open} />
       </button>
 
       {open && (

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import {
   comparisonRows,
   isRanked,
@@ -20,12 +20,16 @@ import {
 import { submitScore, type OccupationChoice, type Submission } from './api'
 import { COFFEE_URL, feedbackUrl, turnstileSiteKey } from './config'
 import { money } from './format'
-import { CoffeeIcon, LockIcon } from './icons'
+import { ChevronIcon, CoffeeIcon, LockIcon } from './icons'
+import { trackSupport } from './events'
 import { useI18n, type Key } from './i18n'
+import { Modal } from './Modal'
 import { OccupationPicker } from './OccupationPicker'
 import { occupationDisplayName } from './occupationSearch'
 import { PartnerRequirements } from './PartnerRequirements'
-import { SECTION_SCORES, medianScore, selectionFor, topPercent } from './sectionScores'
+import { loadMinimized, saveMinimized } from './support'
+import { SECTION_SCORES, medianScore, topPercent, typicalFor } from './sectionScores'
+import { assessmentFor } from './assessment'
 import { Distribution } from './Distribution'
 import { Turnstile } from './Turnstile'
 
@@ -55,12 +59,15 @@ export function Results(props: {
   return (
     <section>
       <p className="text-sm text-stone-500">{t(exact ? 'res.title' : 'res.titleRange')}</p>
-      <p className="mt-1 flex flex-wrap items-baseline gap-x-2">
-        <span className="text-7xl font-semibold tracking-tight">
-          {exact ? low.total : `${low.total}-${high.total}`}
-        </span>
-        <span className="text-lg text-stone-400">{t('res.of', { max: high.max })}</span>
-      </p>
+      <div className="mt-1 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
+        <p className="flex flex-wrap items-baseline gap-x-2">
+          <span className="text-7xl font-semibold tracking-tight">
+            {exact ? low.total : `${low.total}-${high.total}`}
+          </span>
+          <span className="text-lg text-stone-400">{t('res.of', { max: high.max })}</span>
+        </p>
+        {analysisOpen && props.submission && <AssessmentBadge insights={props.submission.insights} />}
+      </div>
 
       {!analysisOpen && (
         <div className="mt-10">
@@ -312,7 +319,7 @@ function InsightsPanel(props: {
             <ScoreBreakdown low={props.result} high={props.result} earningsNote={props.earningsNote} />
           </section>
           <SectionCharts result={props.result} insights={insights} />
-          <OccupationBreakdown insights={insights} />
+          <SupportCard />
         </>
       ) : (
         <WaitingCard insights={insights} onRefresh={props.onRefresh} />
@@ -320,7 +327,7 @@ function InsightsPanel(props: {
 
       <ShareLink />
 
-      {isRanked(overall) && <SupportCard />}
+      {isRanked(overall) && <OccupationBreakdown insights={insights} result={props.result} />}
 
       <p className="text-xs leading-relaxed text-stone-400">{t('ins.disclaimer')}</p>
     </div>
@@ -362,6 +369,66 @@ function WaitingCard(props: { insights: Insights; onRefresh: () => Promise<void>
   )
 }
 
+// A plain label for where the score sits among everyone who submitted, from the top 5% down to the rest.
+function AssessmentBadge({ insights }: { insights: Insights }) {
+  const { t } = useI18n()
+  const { overall } = insights
+  if (!isRanked(overall)) return null
+  const assessment = assessmentFor(topPercent(overall.percentile))
+  return (
+    <div className="pb-2 text-right">
+      <p className={`inline-block rounded-xl px-3.5 py-2 text-lg font-semibold tracking-tight ${assessment.tone}`}>
+        {t(`assess.${assessment.key}` as Key)}
+      </p>
+      <p className="mt-1 text-xs text-stone-500">{t('assess.note', { n: overall.n })}</p>
+    </div>
+  )
+}
+
+// A question mark that explains how the occupation group was chosen, and which group this candidate is in.
+function GroupingHelp({ insights }: { insights: Insights }) {
+  const { t } = useI18n()
+  const [open, setOpen] = useState(false)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const occ = insights.occupation
+  return (
+    <>
+      <button
+        ref={trigger}
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-haspopup="dialog"
+        aria-label={t('group.help')}
+        title={t('group.help')}
+        className="inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-stone-400 text-[11px] font-semibold text-stone-500 active:bg-stone-100"
+      >
+        ?
+      </button>
+      {open && (
+        <Modal
+          title={t('group.title')}
+          onClose={() => {
+            setOpen(false)
+            trigger.current?.focus()
+          }}
+        >
+          <div className="mt-2 grid gap-2.5 text-sm leading-relaxed text-stone-700">
+            <p>{t('group.p1')}</p>
+            <p>{t('group.p2')}</p>
+            <p>{t('group.p3')}</p>
+            <p>{t('group.p4')}</p>
+            {occ?.prefix && occ.level && occ.level < 6 && (
+              <p className="rounded-xl bg-stone-100 p-3 font-medium text-stone-800">
+                {t('group.yours', { prefix: occ.prefix, level: t(`group.level.${occ.level}` as Key), n: occ.n })}
+              </p>
+            )}
+          </div>
+        </Modal>
+      )}
+    </>
+  )
+}
+
 // The name of the occupation group the comparison used: the occupation itself, or a wider group of similar ones.
 function occupationGroupLabel(insights: Insights, t: ReturnType<typeof useI18n>['t'], lang: 'en' | 'zh'): string {
   const occ = insights.occupation
@@ -399,6 +466,12 @@ function Comparison({ insights }: { insights: Insights }) {
               <span className="min-w-0">
                 <span className="block text-sm font-medium">{label(row)}</span>
                 <span className="block text-xs text-stone-500">{t('cmp.n', { n: row.n })}</span>
+                {row.kind === 'occupation' && row.level != null && row.level < 6 && (
+                  <span className="mt-1 flex items-center gap-1.5 text-xs font-medium text-amber-800">
+                    {t('cmp.notExact')}
+                    <GroupingHelp insights={insights} />
+                  </span>
+                )}
               </span>
               <span className="shrink-0 text-right">
                 {row.percentile !== undefined ? (
@@ -493,6 +566,11 @@ function SectionCharts({ result, insights }: { result: VptResult; insights: Insi
   const { overall, occupation } = insights
   const canSwitch = !!occupation && isRanked(occupation) && !!occupation.categoryDist
   const stats: PoolStats = pool === 'similar' && canSwitch ? occupation : overall
+  // Who the median describes, for the sentence under each chart.
+  const who: Key =
+    pool === 'similar' && canSwitch
+      ? occupation.level != null && occupation.level < 6 ? 'typ.who.similar' : 'typ.who.same'
+      : 'typ.who.all'
   const segment = (active: boolean) =>
     `min-h-10 flex-1 rounded-lg px-3 text-sm font-medium transition ${
       active ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 active:text-stone-900'
@@ -512,9 +590,12 @@ function SectionCharts({ result, insights }: { result: VptResult; insights: Insi
           </button>
         </div>
       )}
-      <p className="mt-2 text-xs font-medium text-stone-500">
-        {pool === 'similar' && canSwitch ? `${occupationGroupLabel(insights, t, lang)}. ` : ''}
-        {t('sec.pool.n', { n: stats.n })}
+      <p className="mt-2 flex flex-wrap items-center gap-x-1.5 text-xs font-medium text-stone-500">
+        {pool === 'similar' && canSwitch && <span>{occupationGroupLabel(insights, t, lang)}.</span>}
+        <span>{t('sec.pool.n', { n: stats.n })}</span>
+        {pool === 'similar' && canSwitch && occupation.level != null && occupation.level < 6 && (
+          <GroupingHelp insights={insights} />
+        )}
       </p>
       {pool === 'similar' && canSwitch && stats.n < 5 && (
         <p className="mt-0.5 text-xs text-stone-500">{t('sec.pool.few')}</p>
@@ -524,7 +605,7 @@ function SectionCharts({ result, insights }: { result: VptResult; insights: Insi
           const dist = stats.categoryDist?.[c.key]
           const pct = stats.categoryPercentile?.[c.key]
           const median = dist ? medianScore(dist) : undefined
-          const selection = median === undefined ? null : selectionFor(c.key, median)
+          const typical = median === undefined ? null : typicalFor(c.key, median)
           return (
             <li key={`${pool}-${c.key}`}>
               <div className="flex items-baseline justify-between gap-3 text-sm">
@@ -544,8 +625,12 @@ function SectionCharts({ result, insights }: { result: VptResult; insights: Insi
                 {pct !== undefined && <span className="font-semibold text-accent">{t('ins.pct', { p: topPercent(pct) })}</span>}
                 {pct !== undefined && median !== undefined && ' · '}
                 {median !== undefined && t('sec.median', { median })}
-                {median !== undefined && selection && ` | ${t(selection.key as Key, selection.params)}`}
               </p>
+              {typical && (
+                <p className="mt-0.5 text-xs text-stone-600">
+                  {t('typ.line', { who: t(who), what: t(typical.key as Key, typical.params) })}
+                </p>
+              )}
             </li>
           )
         })}
@@ -557,8 +642,11 @@ function SectionCharts({ result, insights }: { result: VptResult; insights: Insi
   )
 }
 
-// One bar per possible score. The candidate's own bar is highlighted and labelled with its count, and tapping any
-// bar shows how many candidates scored that value.
+// Height in pixels of the tallest section bar.
+const BAR_AREA = 64
+
+// One bar per possible score, with its count on top. The candidate's own bar is highlighted, and tapping any bar
+// shows how many candidates scored that value.
 function ScoreBars({ dist, mine, all }: { dist: { points: number; count: number }[]; mine: number; all: number[] }) {
   const { t } = useI18n()
   const [picked, setPicked] = useState<number | null>(null)
@@ -566,28 +654,29 @@ function ScoreBars({ dist, mine, all }: { dist: { points: number; count: number 
   // One bar for every score the section can give, plus any the server reports that are not in the list.
   const values = [...new Set([...all, ...counts.keys(), mine])].sort((a, b) => a - b)
   const peak = Math.max(1, ...counts.values())
-  // Many bars leave no room for horizontal labels, so they are turned on their side.
+  // Many bars leave no room for horizontal text, so labels and counts are turned on their side.
   const dense = values.length > 8
   const gap = dense ? 'gap-0.5' : 'gap-1'
-  const heightOf = (count: number) => Math.max(count === 0 ? 4 : 8, (count / peak) * 100)
+  const sideways = dense ? '[writing-mode:vertical-rl] rotate-180' : ''
+  // The tallest bar is BAR_AREA pixels. Each count sits in the column just above its own bar.
+  const barPx = (count: number) => Math.round((Math.max(count === 0 ? 4 : 8, (count / peak) * 100) / 100) * BAR_AREA)
 
   return (
     <div className="mt-2">
-      <div className={`flex h-16 items-end pt-4 ${gap}`}>
+      <div className={`flex items-end ${gap} ${dense ? 'h-[calc(4rem+2.25rem)]' : 'h-[calc(4rem+1.5rem)]'}`}>
         {values.map((v) => {
           const count = counts.get(v) ?? 0
-          const height = heightOf(count)
           const text = t('sec.bar', { count, points: v })
           return (
-            <div key={v} className="relative flex h-full flex-1 items-end">
-              {v === mine && (
-                <span
-                  className="absolute inset-x-0 text-center text-[10px] font-semibold text-accent tabular-nums"
-                  style={{ bottom: `calc(${height}% + 2px)` }}
-                >
-                  {count}
-                </span>
-              )}
+            <div key={v} className="flex flex-1 flex-col items-center justify-end">
+              <span
+                data-count
+                className={`mb-0.5 text-[10px] leading-none tabular-nums ${sideways} ${
+                  v === mine ? 'font-semibold text-accent' : count === 0 ? 'text-stone-300' : 'text-stone-500'
+                }`}
+              >
+                {count}
+              </span>
               <button
                 type="button"
                 title={text}
@@ -595,7 +684,7 @@ function ScoreBars({ dist, mine, all }: { dist: { points: number; count: number 
                 aria-pressed={picked === v}
                 onClick={() => setPicked(picked === v ? null : v)}
                 className={`w-full rounded-t ${v === mine ? 'bg-accent' : 'bg-stone-300'} ${picked === v ? 'ring-2 ring-stone-900/70' : ''}`}
-                style={{ height: `${height}%` }}
+                style={{ height: `${barPx(count)}px` }}
               />
             </div>
           )
@@ -605,9 +694,7 @@ function ScoreBars({ dist, mine, all }: { dist: { points: number; count: number 
         {values.map((v) => (
           <span
             key={v}
-            className={`flex-1 text-center ${dense ? '[writing-mode:vertical-rl] rotate-180' : ''} ${
-              v === mine ? 'font-semibold text-accent' : ''
-            }`}
+            className={`flex-1 text-center ${sideways} ${v === mine ? 'font-semibold text-accent' : ''}`}
           >
             {v}
           </span>
@@ -623,24 +710,39 @@ function ScoreBars({ dist, mine, all }: { dist: { points: number; count: number 
   )
 }
 
-// The listed occupations with the most candidates, with how many people chose each and the median score.
-function OccupationBreakdown({ insights }: { insights: Insights }) {
+// The listed occupations with the most candidates. Each row opens to show how that occupation scores: the median
+// total, then the median and the typical person in each of the seven sections.
+function OccupationBreakdown({ insights, result }: { insights: Insights; result: VptResult }) {
   const { t, lang } = useI18n()
+  const [open, setOpen] = useState<Set<string>>(new Set())
   const list = insights.topOccupations ?? []
   if (list.length === 0) return null
-  const biggest = Math.max(...list.map((o) => o.n))
   const everyone = insights.overall.n
+  const toggle = (code: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev)
+      if (!next.delete(code)) next.add(code)
+      return next
+    })
   return (
     <section>
       <h3 className="text-lg font-semibold tracking-tight">{t('occ.title')}</h3>
       <p className="mt-0.5 text-xs text-stone-500">{t('occ.sub')}</p>
-      <ol className="mt-4 grid gap-4">
+      <ol className="mt-4 grid gap-2">
         {list.map((o, i) => {
           const mine = o.code === insights.occupation?.code
+          const isOpen = open.has(o.code)
+          const panel = `occ-${o.code}`
           return (
-            <li key={o.code}>
-              <div className="flex items-baseline justify-between gap-3 text-sm">
-                <span className="min-w-0 font-medium">
+            <li key={o.code} className={`rounded-xl border bg-white ${mine ? 'border-accent/50' : 'border-stone-200'}`}>
+              <button
+                type="button"
+                aria-expanded={isOpen}
+                aria-controls={panel}
+                onClick={() => toggle(o.code)}
+                className="flex min-h-14 w-full items-center justify-between gap-3 rounded-xl px-4 py-3 text-left active:bg-stone-50"
+              >
+                <span className="min-w-0 text-sm font-medium">
                   <span className="mr-1.5 tabular-nums text-stone-400">{i + 1}</span>
                   {occupationDisplayName(o.code, lang)}
                   {mine && (
@@ -649,17 +751,39 @@ function OccupationBreakdown({ insights }: { insights: Insights }) {
                     </span>
                   )}
                 </span>
-                <span className="shrink-0 tabular-nums text-stone-500">{t('occ.median', { median: o.median })}</span>
-              </div>
-              <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-stone-200">
-                <div
-                  className={`h-full rounded-full ${mine ? 'bg-accent' : 'bg-stone-400'}`}
-                  style={{ width: `${(o.n / biggest) * 100}%` }}
-                />
-              </div>
-              <p className="mt-1 text-xs text-stone-500">
-                {t('occ.share', { n: o.n, share: Math.round((100 * o.n) / Math.max(1, everyone)) })}
-              </p>
+                <span className="flex shrink-0 items-center gap-2">
+                  {/* The line breaks after the comma, so the count and the share each sit on their own line. */}
+                  <span className="whitespace-pre-line text-right text-xs leading-snug text-stone-500">
+                    {t('occ.share', { n: o.n, share: Math.round((100 * o.n) / Math.max(1, everyone)) }).replace(/([,，])\s*/, '$1\n')}
+                  </span>
+                  <ChevronIcon open={isOpen} />
+                </span>
+              </button>
+              {isOpen && (
+                <div id={panel} className="border-t border-stone-100 px-4 py-3">
+                  <p className="text-sm font-semibold">{t('occ.medianTotal', { median: o.median })}</p>
+                  <ul className="mt-3 grid gap-3">
+                    {result.categories.map((c) => {
+                      const median = o.categoryMedian?.[c.key]
+                      if (median === undefined) return null
+                      const typical = typicalFor(c.key, median)
+                      return (
+                        <li key={c.key}>
+                          <div className="flex items-baseline justify-between gap-3 text-sm">
+                            <span className="font-medium">{t(`cat.${c.key}` as Key)}</span>
+                            <span className="shrink-0 tabular-nums text-stone-500">{t('sec.median', { median })}</span>
+                          </div>
+                          {typical && (
+                            <p className="mt-0.5 text-xs text-stone-600">
+                              {t('typ.line', { who: t('typ.who.this'), what: t(typical.key as Key, typical.params) })}
+                            </p>
+                          )}
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
+              )}
             </li>
           )
         })}
@@ -668,15 +792,81 @@ function OccupationBreakdown({ insights }: { insights: Insights }) {
   )
 }
 
+// Calls back once, the first time at least half of the element is on screen.
+function useSeen(ref: RefObject<Element | null>, onSeen: () => void) {
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    if (typeof IntersectionObserver === 'undefined') {
+      onSeen()
+      return
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          onSeen()
+          observer.disconnect()
+        }
+      },
+      { threshold: 0.5 },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+    // The callback only sends a count, so the first render's version is enough.
+  }, [])
+}
+
 // An optional tip and a feedback link, shown once the visitor has their analysis. Nothing is unlocked by paying.
+// It can be minimized, and stays minimized on later visits. Views, minimizes and clicks are counted anonymously.
 function SupportCard() {
   const { t } = useI18n()
   const feedback = feedbackUrl()
+  const [minimized, setMinimized] = useState(loadMinimized)
+  const ref = useRef<HTMLElement>(null)
+  useSeen(ref, () => trackSupport('coffee_seen'))
   const button =
     'inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold transition active:scale-[0.98]'
+  const change = (next: boolean) => {
+    setMinimized(next)
+    saveMinimized(next)
+  }
+
+  if (minimized) {
+    return (
+      <section ref={ref} className="rounded-2xl border border-[#f28b50]/25 bg-[#fef8f5] px-5">
+        <button
+          type="button"
+          aria-expanded={false}
+          onClick={() => change(false)}
+          className="flex min-h-14 w-full items-center justify-between gap-3 text-left"
+        >
+          <span className="font-semibold text-[#d9672b]">{t('support.title')}</span>
+          <span className="flex items-center gap-1.5 text-sm font-medium text-stone-600">
+            {t('support.expand')}
+            <ChevronIcon open={false} />
+          </span>
+        </button>
+      </section>
+    )
+  }
+
   return (
-    <section className="rounded-2xl border border-[#f28b50]/25 bg-[#fef8f5] p-6 text-stone-900">
-      <h3 className="text-2xl font-semibold tracking-tight text-[#d9672b]">{t('support.title')}</h3>
+    <section ref={ref} className="rounded-2xl border border-[#f28b50]/25 bg-[#fef8f5] p-6 text-stone-900">
+      <div className="flex items-start justify-between gap-3">
+        <h3 className="text-2xl font-semibold tracking-tight text-[#d9672b]">{t('support.title')}</h3>
+        <button
+          type="button"
+          aria-expanded
+          onClick={() => {
+            trackSupport('coffee_minimized')
+            change(true)
+          }}
+          className="-mt-2 -mr-3 flex min-h-11 shrink-0 items-center gap-1 px-3 text-xs font-medium text-stone-500 active:text-stone-900"
+        >
+          {t('support.minimize')}
+          <ChevronIcon open />
+        </button>
+      </div>
       <p className="mt-2 max-w-md text-sm leading-relaxed text-stone-700">{t('support.body')}</p>
       <p className="mt-2 max-w-md text-sm leading-relaxed text-stone-700">{t('support.feedbackNote')}</p>
       <div className="mt-5 flex flex-wrap gap-3">
@@ -684,6 +874,7 @@ function SupportCard() {
           href={COFFEE_URL}
           target="_blank"
           rel="noopener noreferrer"
+          onClick={() => trackSupport('coffee_clicked')}
           className={`${button} bg-[#f28b50] text-stone-900 shadow-sm hover:bg-[#ee7d3d]`}
         >
           <CoffeeIcon className="size-5" />

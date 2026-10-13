@@ -30,7 +30,10 @@ export interface TopOccupation {
   code: string
   name: string
   n: number
+  // Median total score.
   median: number
+  // Median points in each section.
+  categoryMedian?: Partial<Record<CategoryKey, number>>
 }
 
 export interface Insights {

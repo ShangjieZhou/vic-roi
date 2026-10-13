@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Insights } from '../supabase/functions/_shared/insights'
 import { App } from './App'
 import * as api from './api'
+import * as events from './events'
 import { LangProvider } from './i18n'
 import { addToHistory, loadHistory, type HistoryEntry } from './saved'
 
@@ -11,6 +12,7 @@ vi.mock('./api', () => ({
   submitScore: vi.fn(),
   loadSubmission: vi.fn(),
 }))
+vi.mock('./events', () => ({ trackSupport: vi.fn() }))
 
 const ID = '2ceb142f-cccc-4081-834a-133f83343775'
 const ID2 = '9a1b2c3d-1111-4222-8333-444455556666'
@@ -85,6 +87,7 @@ function submitFromScratch() {
 beforeEach(() => {
   vi.mocked(api.submitScore).mockReset()
   vi.mocked(api.loadSubmission).mockReset()
+  vi.mocked(events.trackSupport).mockReset()
 })
 
 afterEach(() => {
@@ -404,19 +407,24 @@ describe('the analysis page', () => {
 
     it('scales each bar to its count', async () => {
       await open(withCharts)
-      expect(screen.getByTitle('8 candidates at 300 points').getAttribute('style')).toContain('height: 100%')
-      expect(screen.getByTitle('4 candidates at 286 points').getAttribute('style')).toContain('height: 50%')
+      expect(screen.getByTitle('8 candidates at 300 points').getAttribute('style')).toContain('height: 64px')
+      expect(screen.getByTitle('4 candidates at 286 points').getAttribute('style')).toContain('height: 32px')
     })
 
     it('shows the top percent and the median under each section', async () => {
       await open(withCharts)
-      for (const text of [
-        'Top 22% · Median 300 | Ages 20 to 29', 'Top 79% · Median 100 | Proficient',
-        'Top 60% · Median 60 | 3 to 5 years', "Top 67% · Median 50 | Bachelor's or Honours",
-        'Top 37% · Median 50 | Skill level 1', 'Top 53% · Median 0 | No partner points',
-        'Top 13% · Median 0 | Under $80,000, or offshore',
-      ]) {
-        expect(screen.getByText((_, el) => el?.tagName === 'P' && el.textContent === text), text).toBeTruthy()
+      const lines = [
+        ['Top 22% · Median score: 300', 'People typically are aged between 20 and 29'],
+        ['Top 79% · Median score: 100', 'People typically have proficient English'],
+        ['Top 60% · Median score: 60', 'People typically have 3 to 5 years of experience'],
+        ['Top 67% · Median score: 50', "People typically hold a bachelor's or honours degree"],
+        ['Top 37% · Median score: 50', 'People typically work in a skill level 1 occupation'],
+        ['Top 53% · Median score: 0', 'People typically do not claim partner points'],
+        ['Top 13% · Median score: 0', 'People typically earn under $80,000 a year, or are offshore'],
+      ]
+      for (const [stat, sentence] of lines) {
+        expect(screen.getByText((_, el) => el?.tagName === 'P' && el.textContent === stat), stat).toBeTruthy()
+        expect(screen.getByText(sentence), sentence).toBeTruthy()
       }
     })
 
@@ -468,7 +476,8 @@ describe('the analysis page', () => {
     it('is shown in Chinese', async () => {
       await open(withCharts, 'zh')
       expect(screen.getByText('各部分得分分布')).toBeTruthy()
-      expect(screen.getByText((_, el) => el?.tagName === 'P' && el.textContent === '前22% · 中位数 300 | 20 至 29 岁')).toBeTruthy()
+      expect(screen.getByText((_, el) => el?.tagName === 'P' && el.textContent === '前22% · 中位数得分：300')).toBeTruthy()
+      expect(screen.getByText('候选人通常年龄在 20 至 29 岁之间')).toBeTruthy()
       expect(screen.getByTitle('286 分：4 位候选人')).toBeTruthy()
       expect(screen.getByText(/“前xx%”表示得分高于您的候选人所占比例/)).toBeTruthy()
     })
@@ -521,8 +530,14 @@ const full: Insights = {
     },
   },
   topOccupations: [
-    { code: '261313', name: 'Software engineer', n: 10, median: 560 },
-    { code: '254412', name: 'Registered nurse (aged care)', n: 6, median: 480 },
+    {
+      code: '261313', name: 'Software engineer', n: 10, median: 560,
+      categoryMedian: { age: 300, english: 200, experience: 60, education: 75, skillLevel: 50, partner: 0, earnings: 103 },
+    },
+    {
+      code: '254412', name: 'Registered nurse (aged care)', n: 6, median: 480,
+      categoryMedian: { age: 286, english: 100, experience: 40, education: 50, skillLevel: 50, partner: 50, earnings: 0 },
+    },
     { code: '221111', name: 'Accountant (general)', n: 4, median: 500 },
   ],
 }
@@ -538,29 +553,153 @@ const openFull = async (insights: Insights, lang: 'en' | 'zh' = 'en') => {
 }
 
 describe('distribution under each ranking', () => {
-  it('draws a graph for each of the three rankings', async () => {
+  const groups = (name: RegExp) => screen.getAllByRole('group', { name })
+
+  it('draws a bar chart for each of the three rankings', async () => {
     await openFull(full)
-    expect(screen.getAllByRole('img', { name: /Where your score of 546 sits among/ })).toHaveLength(3)
-    expect(screen.getByRole('img', { name: /among 40 candidates/ })).toBeTruthy()
-    expect(screen.getByRole('img', { name: /among 8 candidates/ })).toBeTruthy()
-    expect(screen.getByRole('img', { name: /among 35 candidates/ })).toBeTruthy()
+    expect(groups(/Your score is 546/)).toHaveLength(3)
+    expect(screen.getByRole('group', { name: /How 40 candidates scored/ })).toBeTruthy()
+    expect(screen.getByRole('group', { name: /How 8 candidates scored/ })).toBeTruthy()
+    expect(screen.getByRole('group', { name: /How 35 candidates scored/ })).toBeTruthy()
   })
 
-  it('shows dots for the small occupation group and a curve for the large ones', async () => {
+  it('shows each bar\'s score range of 20 points on hover', async () => {
     await openFull(full)
-    const label = (n: number) => screen.getByRole('img', { name: new RegExp(`among ${n} candidates`) })
-    expect(label(8).querySelector('path')).toBeNull()
-    expect(label(40).querySelector('path')).not.toBeNull()
+    const chart = screen.getByRole('group', { name: /How 40 candidates scored/ })
+    // The test data puts 10 candidates in the 500 to 519 points bar.
+    expect(within(chart).getByTitle('500 to 519 points: 10 candidates')).toBeTruthy()
+    for (const bar of within(chart).getAllByRole('button')) {
+      expect(bar.getAttribute('title')).toMatch(/^\d+ to \d+ points: \d+ candidates?$/)
+    }
   })
 
   it('draws no graph for a group the server sent no histogram for', async () => {
     await openFull({ ...full, locationGroup: { n: 35, percentile: 60, median: 535 } })
-    expect(screen.getAllByRole('img', { name: /Where your score of 546 sits among/ })).toHaveLength(2)
+    expect(groups(/Your score is 546/)).toHaveLength(2)
   })
 
   it('is in Chinese', async () => {
     await openFull(full, 'zh')
-    expect(screen.getAllByRole('img', { name: /您的 546 分在/ }).length).toBe(3)
+    expect(screen.getAllByRole('group', { name: /您的得分是 546/ }).length).toBe(3)
+  })
+})
+
+describe('assessment next to the score', () => {
+  const withPercentile = (percentile: number): Insights => ({ ...full, overall: { ...full.overall, percentile } })
+
+  it.each([
+    [97, 'Outstanding'], [92, 'Very competitive'], [80, 'Competitive'],
+    [62, 'Above average'], [40, 'Average'], [10, 'Below average'],
+  ])('at percentile %i it says %s', async (percentile, label) => {
+    await openFull(withPercentile(percentile))
+    expect(screen.getByText(label, { selector: 'p' })).toBeTruthy()
+    expect(screen.getByText('Compared with 40 candidates on this site')).toBeTruthy()
+  })
+
+  it('sits on the same row as the big score', async () => {
+    await openFull(full)
+    const score = screen.getByText('546', { selector: 'span' })
+    const badge = screen.getByText('Above average', { selector: 'p' })
+    expect(score.closest('div')).toBe(badge.closest('div')!.parentElement)
+  })
+
+  it('is not shown before submitting', () => {
+    reachSubmitCard()
+    expect(screen.queryByText(/Compared with \d+ candidates on this site/)).toBeNull()
+  })
+
+  it('is not shown while the comparison is locked', async () => {
+    vi.mocked(api.loadSubmission).mockResolvedValue({ input: INPUT, submission: submission(waiting(4)) })
+    addToHistory(entry(ID))
+    renderApp()
+    openHistory()
+    fireEvent.click(screen.getByText('546 points'))
+    await screen.findByText('Your score is saved')
+    expect(screen.queryByText(/on this site/)).toBeNull()
+  })
+
+  it('is in Chinese', async () => {
+    await openFull(full, 'zh')
+    expect(screen.getByText('高于平均')).toBeTruthy()
+    expect(screen.getByText('与本站 40 位候选人相比')).toBeTruthy()
+  })
+})
+
+describe('an occupation group that is not an exact match', () => {
+  it('says so in the ranking and explains the method behind a question mark', async () => {
+    await openFull(full)
+    expect(screen.getAllByText('Not an exact match').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    fireEvent.click(screen.getAllByRole('button', { name: 'How is this group chosen?' })[0])
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByText('How the occupation group is chosen')).toBeTruthy()
+    expect(within(dialog).getByText(/fewer than 5 candidates chose your exact occupation/)).toBeTruthy()
+    expect(within(dialog).getByText(/first 4 digits/)).toBeTruthy()
+    expect(
+      within(dialog).getByText('Your group: every occupation whose code starts with 2613 (the unit group), 8 candidates.'),
+    ).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('names the right level for a wider group', async () => {
+    await openFull({ ...full, occupation: { ...full.occupation!, level: 3, prefix: '261', n: 12 } })
+    fireEvent.click(screen.getAllByRole('button', { name: 'How is this group chosen?' })[0])
+    expect(screen.getByText('Your group: every occupation whose code starts with 261 (the minor group), 12 candidates.')).toBeTruthy()
+  })
+
+  it('shows nothing of the kind for an exact occupation', async () => {
+    await openFull({ ...full, occupation: { ...full.occupation!, level: 6, prefix: '261313' } })
+    expect(screen.queryByText('Not an exact match')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'How is this group chosen?' })).toBeNull()
+  })
+
+  it('shows nothing of the kind for an occupation typed in by hand', async () => {
+    await openFull({ ...full, occupation: { ...full.occupation!, code: null, level: null, prefix: null } })
+    expect(screen.queryByText('Not an exact match')).toBeNull()
+  })
+
+  it('offers the same explanation beside the similar-occupation chart', async () => {
+    await openFull(full)
+    const before = screen.getAllByRole('button', { name: 'How is this group chosen?' }).length
+    fireEvent.click(screen.getByRole('button', { name: 'Similar occupation' }))
+    expect(screen.getAllByRole('button', { name: 'How is this group chosen?' }).length).toBe(before + 1)
+  })
+
+  it('is in Chinese', async () => {
+    await openFull(full, 'zh')
+    expect(screen.getAllByText('并非完全相同的职业').length).toBeGreaterThan(0)
+    fireEvent.click(screen.getAllByRole('button', { name: '这个对比范围是怎么确定的？' })[0])
+    expect(screen.getByText('职业对比范围的确定方式')).toBeTruthy()
+    expect(screen.getByText(/代码以 2613 开头的所有职业（细分组），共 8 位候选人/)).toBeTruthy()
+  })
+})
+
+describe('volume on top of each section bar', () => {
+  it('prints the count on every bar, including bars nobody has', async () => {
+    await openFull(full)
+    const countOf = (title: string) => screen.getAllByTitle(title)[0].previousElementSibling?.textContent
+    expect(countOf('8 candidates at 300 points')).toBe('8')
+    expect(countOf('4 candidates at 286 points')).toBe('4')
+    expect(countOf('0 candidates at 265 points')).toBe('0')
+  })
+
+  it('has a count for every bar', async () => {
+    await openFull(full)
+    expect(document.querySelectorAll('[data-count]')).toHaveLength(56)
+  })
+
+  it('highlights the count on the candidate\'s own bar', async () => {
+    await openFull(full)
+    const own = screen.getByTitle('4 candidates at 286 points').previousElementSibling!
+    expect(own.className).toContain('text-accent')
+  })
+
+  it('stays in step when the chart switches to similar occupations', async () => {
+    await openFull(full)
+    fireEvent.click(screen.getByRole('button', { name: 'Similar occupation' }))
+    const six = screen.getAllByTitle('6 candidates at 300 points')[0]
+    expect(six.previousElementSibling?.textContent).toBe('6')
   })
 })
 
@@ -620,18 +759,22 @@ describe('comparing sections with similar occupations', () => {
     await openFull(full)
     expect(screen.getByRole('button', { name: 'All candidates' }).getAttribute('aria-pressed')).toBe('true')
     expect(screen.getByText('Compared with 40 candidates')).toBeTruthy()
-    expect(pctLine('Top 22% · Median 300 | Ages 20 to 29')).toBeTruthy()
+    expect(pctLine('Top 22% · Median score: 300')).toBeTruthy()
+    expect(screen.getByText('People typically are aged between 20 and 29')).toBeTruthy()
   })
 
   it('switches every chart to the similar occupation group', async () => {
     await openFull(full)
     fireEvent.click(screen.getByRole('button', { name: 'Similar occupation' }))
     expect(screen.getByRole('button', { name: 'Similar occupation' }).getAttribute('aria-pressed')).toBe('true')
-    expect(screen.getByText('Similar to Software engineer (ANZSCO 2613). Compared with 8 candidates', { exact: false })).toBeTruthy()
+    expect(screen.getByText(/Similar to Software engineer \(ANZSCO 2613\)\./)).toBeTruthy()
+    expect(screen.getByText('Compared with 8 candidates')).toBeTruthy()
     // Age in this group: 90th percentile, median 300.
-    expect(pctLine('Top 10% · Median 300 | Ages 20 to 29')).toBeTruthy()
+    expect(pctLine('Top 10% · Median score: 300')).toBeTruthy()
+    expect(screen.getByText('People in similar occupations typically are aged between 20 and 29')).toBeTruthy()
     // Partner: 50th percentile, median 0.
-    expect(pctLine('Top 50% · Median 0 | No partner points')).toBeTruthy()
+    expect(pctLine('Top 50% · Median score: 0')).toBeTruthy()
+    expect(screen.getByText('People in similar occupations typically do not claim partner points')).toBeTruthy()
   })
 
   it('switches back to all candidates', async () => {
@@ -667,30 +810,100 @@ describe('comparing sections with similar occupations', () => {
 })
 
 describe('top occupations', () => {
-  it('lists the most common occupations with counts, share and median', async () => {
+  const rowButtons = () => screen.getAllByRole('button').filter((b) => b.getAttribute('aria-controls')?.startsWith('occ-'))
+  // The count and the share sit on two lines, so compare the text with the line break as a space.
+  const textOf = (el: Element) => (el.textContent ?? '').replace(/\s+/g, ' ')
+
+  it('lists the most common occupations with the count and share on the right', async () => {
     await openFull(full)
     expect(screen.getByText('Top occupations')).toBeTruthy()
-    const items = screen.getAllByRole('listitem').filter((li) => li.textContent?.includes('of everyone'))
-    expect(items).toHaveLength(3)
-    expect(items[0].textContent).toContain('Software engineer')
-    expect(items[0].textContent).toContain('10 candidates, 25% of everyone')
-    expect(items[0].textContent).toContain('Median 560')
-    expect(items[1].textContent).toContain('Registered nurse (aged care)')
-    expect(items[1].textContent).toContain('6 candidates, 15% of everyone')
+    const rows = rowButtons()
+    expect(rows).toHaveLength(3)
+    expect(rows[0].textContent).toContain('Software engineer')
+    expect(textOf(rows[0])).toContain('10 candidates, 25% of everyone')
+    expect(rows[1].textContent).toContain('Registered nurse (aged care)')
+    expect(textOf(rows[1])).toContain('6 candidates, 15% of everyone')
+    expect(textOf(rows[2])).toContain('4 candidates, 10% of everyone')
   })
 
-  it('scales each bar to the biggest group', async () => {
+  it('has no filled bars and no median on the collapsed rows', async () => {
     await openFull(full)
-    const bars = [...document.querySelectorAll('ol .h-full')]
-    expect(bars.map((b) => b.getAttribute('style'))).toEqual(['width: 100%;', 'width: 60%;', 'width: 40%;'])
+    for (const row of rowButtons()) {
+      expect(row.textContent).not.toMatch(/Median/)
+      expect(row.querySelector('.h-2')).toBeNull()
+    }
+    expect(document.querySelectorAll('ol .rounded-full.h-full')).toHaveLength(0)
+  })
+
+  it('invites a tap: tells the visitor and shows a chevron on every row', async () => {
+    await openFull(full)
+    expect(screen.getByText(/Tap one to see how it scores/)).toBeTruthy()
+    for (const row of rowButtons()) expect(row.querySelector('svg')).not.toBeNull()
+  })
+
+  it('starts collapsed', async () => {
+    await openFull(full)
+    for (const row of rowButtons()) expect(row.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByText(/Median total score/)).toBeNull()
+  })
+
+  it('opens to the median total and the median and typical person for each of the seven sections', async () => {
+    await openFull(full)
+    fireEvent.click(rowButtons()[0])
+    expect(rowButtons()[0].getAttribute('aria-expanded')).toBe('true')
+    const panel = document.getElementById('occ-261313')!
+    expect(within(panel).getByText('Median total score: 560')).toBeTruthy()
+    for (const label of [
+      'Age', 'English language', 'Experience in nominated occupation', 'Education',
+      'Occupation skill level', "Partner's skill", 'Victorian skilled earnings',
+    ]) {
+      expect(within(panel).getByText(label), label).toBeTruthy()
+    }
+    expect(within(panel).getAllByText(/^Median score: /)).toHaveLength(7)
+    for (const sentence of [
+      'People in this occupation typically are aged between 20 and 29',
+      'People in this occupation typically have superior English',
+      'People in this occupation typically have 3 to 5 years of experience',
+      "People in this occupation typically hold a master's degree",
+      'People in this occupation typically work in a skill level 1 occupation',
+      'People in this occupation typically do not claim partner points',
+      'People in this occupation typically earn $140,000 to $144,999 a year',
+    ]) {
+      expect(within(panel).getByText(sentence), sentence).toBeTruthy()
+    }
+  })
+
+  it('shows the medians for that occupation, not another', async () => {
+    await openFull(full)
+    fireEvent.click(rowButtons()[1])
+    const panel = document.getElementById('occ-254412')!
+    expect(within(panel).getByText('Median total score: 480')).toBeTruthy()
+    expect(within(panel).getByText('People in this occupation typically qualify for partner points')).toBeTruthy()
+    expect(within(panel).getByText('People in this occupation typically earn under $80,000 a year, or are offshore')).toBeTruthy()
+  })
+
+  it('closes again, and lets several rows stay open', async () => {
+    await openFull(full)
+    fireEvent.click(rowButtons()[0])
+    fireEvent.click(rowButtons()[1])
+    expect(screen.getAllByText(/Median total score/)).toHaveLength(2)
+    fireEvent.click(rowButtons()[0])
+    expect(screen.getAllByText(/Median total score/)).toHaveLength(1)
+    expect(rowButtons()[0].getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('opens a row that has no section medians to just the median total', async () => {
+    await openFull(full)
+    fireEvent.click(rowButtons()[2])
+    const panel = document.getElementById('occ-221111')!
+    expect(within(panel).getByText('Median total score: 500')).toBeTruthy()
+    expect(within(panel).queryByText(/^Median score: /)).toBeNull()
   })
 
   it('tags the candidate\'s own occupation', async () => {
     await openFull(full)
-    const mine = screen.getAllByRole('listitem').find((li) => li.textContent?.includes('Software engineer') && li.textContent.includes('of everyone'))!
-    expect(mine.textContent).toContain('You')
-    const other = screen.getAllByRole('listitem').find((li) => li.textContent?.includes('Accountant'))!
-    expect(other.textContent).not.toMatch(/\bYou\b/)
+    expect(rowButtons()[0].textContent).toContain('You')
+    expect(rowButtons()[2].textContent).not.toMatch(/\bYou\b/)
   })
 
   it('is left out when no occupation has two candidates yet', async () => {
@@ -706,7 +919,16 @@ describe('top occupations', () => {
   it('shows Chinese names with the English title beside them', async () => {
     await openFull(full, 'zh')
     expect(screen.getByText('热门职业')).toBeTruthy()
-    expect(screen.getAllByText(/软件工程师（Software engineer）/).length).toBeGreaterThan(0)
+    expect(rowButtons()[0].textContent).toContain('软件工程师（Software engineer）')
+    expect(textOf(rowButtons()[0])).toContain('10 位候选人， 占全部的 25%')
+  })
+
+  it('opens in Chinese with the same breakdown', async () => {
+    await openFull(full, 'zh')
+    fireEvent.click(rowButtons()[0])
+    const panel = document.getElementById('occ-261313')!
+    expect(within(panel).getByText('总分中位数：560')).toBeTruthy()
+    expect(within(panel).getByText('该职业的候选人通常年龄在 20 至 29 岁之间')).toBeTruthy()
   })
 })
 
@@ -725,16 +947,20 @@ describe('support card', () => {
 
   it('offers a tip at the bottom of the analysis, linking to the Buy Me a Coffee page', async () => {
     vi.stubEnv('VITE_FEEDBACK_URL', '')
-    await open(withCharts)
+    await open(full)
     const coffee = screen.getByText('Buy me a coffee').closest('a')!
     expect(coffee.getAttribute('href')).toBe('https://buymeacoffee.com/shangjie')
     expect(coffee.getAttribute('target')).toBe('_blank')
     expect(coffee.getAttribute('rel')).toContain('noopener')
     expect(screen.getByText(/any amount is appreciated/)).toBeTruthy()
     expect(screen.queryByText('Send feedback')).toBeNull()
-    // It comes after the share link and before the disclaimer.
+    // It sits under the section charts and above the share link, and the top occupations come after the share link.
+    const charts = screen.getByText('Your score in each section')
     const share = screen.getByText('Keep this link to return to your result.')
-    expect(share.compareDocumentPosition(coffee) & 4).toBe(4)
+    const occupations = screen.getByText('Top occupations')
+    expect(charts.compareDocumentPosition(coffee) & 4).toBe(4)
+    expect(coffee.compareDocumentPosition(share) & 4).toBe(4)
+    expect(share.compareDocumentPosition(occupations) & 4).toBe(4)
   })
 
   it('shows a feedback button once a form link is set', async () => {
@@ -746,6 +972,111 @@ describe('support card', () => {
   it('is not shown under the score before submitting', () => {
     reachSubmitCard()
     expect(screen.queryByText('Found it helpful?')).toBeNull()
+  })
+
+  describe('minimizing and counting', () => {
+    afterEach(() => vi.unstubAllGlobals())
+
+    const stubObserver = () => {
+      let fire: (visible: boolean) => void = () => {}
+      const disconnect = vi.fn()
+      class Fake {
+        constructor(cb: IntersectionObserverCallback) {
+          fire = (visible) => cb([{ isIntersecting: visible } as IntersectionObserverEntry], this as never)
+        }
+        observe() {}
+        disconnect = disconnect
+        unobserve() {}
+        takeRecords() { return [] }
+      }
+      vi.stubGlobal('IntersectionObserver', Fake)
+      return { show: () => fire(true), hide: () => fire(false), disconnect }
+    }
+
+    it('starts open, with a way to minimize', async () => {
+      await open(withCharts)
+      expect(screen.getByText('Buy me a coffee')).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Minimize' })).toBeTruthy()
+    })
+
+    it('shrinks to a slim bar and counts the minimize', async () => {
+      await open(withCharts)
+      fireEvent.click(screen.getByRole('button', { name: 'Minimize' }))
+      expect(events.trackSupport).toHaveBeenCalledWith('coffee_minimized')
+      expect(events.trackSupport).toHaveBeenCalledTimes(1)
+      expect(screen.queryByText('Buy me a coffee')).toBeNull()
+      expect(screen.getByText('Found it helpful?')).toBeTruthy()
+      expect(screen.getByRole('button', { name: /Expand/ }).getAttribute('aria-expanded')).toBe('false')
+    })
+
+    it('opens again without counting a second minimize', async () => {
+      await open(withCharts)
+      fireEvent.click(screen.getByRole('button', { name: 'Minimize' }))
+      fireEvent.click(screen.getByRole('button', { name: /Expand/ }))
+      expect(screen.getByText('Buy me a coffee')).toBeTruthy()
+      expect(events.trackSupport).toHaveBeenCalledTimes(1)
+    })
+
+    it('stays minimized on the next visit', async () => {
+      await open(withCharts)
+      fireEvent.click(screen.getByRole('button', { name: 'Minimize' }))
+      cleanup()
+      window.history.replaceState(null, '', '/')
+      await open(withCharts)
+      expect(screen.queryByText('Buy me a coffee')).toBeNull()
+      expect(screen.getByRole('button', { name: /Expand/ })).toBeTruthy()
+    })
+
+    it('counts a click on the coffee button', async () => {
+      await open(withCharts)
+      fireEvent.click(screen.getByText('Buy me a coffee'))
+      expect(events.trackSupport).toHaveBeenCalledWith('coffee_clicked')
+    })
+
+    it('counts a view once the card is half on screen, and only once', async () => {
+      const observer = stubObserver()
+      await open(withCharts)
+      expect(events.trackSupport).not.toHaveBeenCalledWith('coffee_seen')
+      observer.hide()
+      expect(events.trackSupport).not.toHaveBeenCalledWith('coffee_seen')
+      observer.show()
+      expect(events.trackSupport).toHaveBeenCalledWith('coffee_seen')
+      expect(observer.disconnect).toHaveBeenCalled()
+      expect(vi.mocked(events.trackSupport).mock.calls.filter((c) => c[0] === 'coffee_seen')).toHaveLength(1)
+    })
+
+    it('counts a view of the minimized bar too', async () => {
+      const observer = stubObserver()
+      await open(withCharts)
+      fireEvent.click(screen.getByRole('button', { name: 'Minimize' }))
+      cleanup()
+      window.history.replaceState(null, '', '/')
+      await open(withCharts)
+      observer.show()
+      expect(events.trackSupport).toHaveBeenCalledWith('coffee_seen')
+    })
+
+    it('counts a view straight away where the browser cannot watch scrolling', async () => {
+      vi.stubGlobal('IntersectionObserver', undefined)
+      await open(withCharts)
+      expect(events.trackSupport).toHaveBeenCalledWith('coffee_seen')
+    })
+
+    it('counts nothing while the comparison is locked', async () => {
+      vi.mocked(api.loadSubmission).mockResolvedValue({ input: INPUT, submission: submission(waiting(4)) })
+      addToHistory(entry(ID))
+      renderApp()
+      openHistory()
+      fireEvent.click(screen.getByText('546 points'))
+      await screen.findByText('Your score is saved')
+      expect(events.trackSupport).not.toHaveBeenCalled()
+    })
+
+    it('is in Chinese', async () => {
+      await open(withCharts, 'zh')
+      fireEvent.click(screen.getByRole('button', { name: '收起' }))
+      expect(screen.getByRole('button', { name: /展开/ })).toBeTruthy()
+    })
   })
 
   it('stays hidden while the comparison is still locked', async () => {

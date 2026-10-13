@@ -46,3 +46,19 @@ export function CoffeeIcon({ className = 'size-5' }: { className?: string }) {
     </svg>
   )
 }
+
+// A chevron that points down, and up when open.
+export function ChevronIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      aria-hidden="true"
+      className={`size-4 shrink-0 text-stone-500 transition-transform ${open ? 'rotate-180' : ''}`}
+    >
+      <path d="m5 7.5 5 5 5-5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
