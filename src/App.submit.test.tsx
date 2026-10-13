@@ -584,44 +584,13 @@ describe('distribution under each ranking', () => {
   })
 })
 
-describe('assessment next to the score', () => {
-  const withPercentile = (percentile: number): Insights => ({ ...full, overall: { ...full.overall, percentile } })
-
-  it.each([
-    [97, 'Outstanding'], [92, 'Very competitive'], [80, 'Competitive'],
-    [62, 'Above average'], [40, 'Average'], [10, 'Below average'],
-  ])('at percentile %i it says %s', async (percentile, label) => {
-    await openFull(withPercentile(percentile))
-    expect(screen.getByText(label, { selector: 'p' })).toBeTruthy()
-    expect(screen.getByText('Compared with 40 candidates on this site')).toBeTruthy()
-  })
-
-  it('sits on the same row as the big score', async () => {
+describe('score header', () => {
+  it('shows no assessment label beside the score', async () => {
     await openFull(full)
-    const score = screen.getByText('546', { selector: 'span' })
-    const badge = screen.getByText('Above average', { selector: 'p' })
-    expect(score.closest('div')).toBe(badge.closest('div')!.parentElement)
-  })
-
-  it('is not shown before submitting', () => {
-    reachSubmitCard()
-    expect(screen.queryByText(/Compared with \d+ candidates on this site/)).toBeNull()
-  })
-
-  it('is not shown while the comparison is locked', async () => {
-    vi.mocked(api.loadSubmission).mockResolvedValue({ input: INPUT, submission: submission(waiting(4)) })
-    addToHistory(entry(ID))
-    renderApp()
-    openHistory()
-    fireEvent.click(screen.getByText('546 points'))
-    await screen.findByText('Your score is saved')
+    for (const label of ['Outstanding', 'Very competitive', 'Competitive', 'Above average', 'Below average']) {
+      expect(screen.queryByText(label, { selector: 'p' }), label).toBeNull()
+    }
     expect(screen.queryByText(/on this site/)).toBeNull()
-  })
-
-  it('is in Chinese', async () => {
-    await openFull(full, 'zh')
-    expect(screen.getByText('高于平均')).toBeTruthy()
-    expect(screen.getByText('与本站 40 位候选人相比')).toBeTruthy()
   })
 })
 
@@ -954,13 +923,15 @@ describe('support card', () => {
     expect(coffee.getAttribute('rel')).toContain('noopener')
     expect(screen.getByText(/any amount is appreciated/)).toBeTruthy()
     expect(screen.queryByText('Send feedback')).toBeNull()
-    // It sits under the section charts and above the share link, and the top occupations come after the share link.
+    // It sits under the section charts and above the top occupations. The share link comes last, above Start over.
     const charts = screen.getByText('Your score in each section')
-    const share = screen.getByText('Keep this link to return to your result.')
     const occupations = screen.getByText('Top occupations')
+    const share = screen.getByText('Keep this link to return to your result.')
+    const startOver = screen.getByText('Start over')
     expect(charts.compareDocumentPosition(coffee) & 4).toBe(4)
-    expect(coffee.compareDocumentPosition(share) & 4).toBe(4)
-    expect(share.compareDocumentPosition(occupations) & 4).toBe(4)
+    expect(coffee.compareDocumentPosition(occupations) & 4).toBe(4)
+    expect(occupations.compareDocumentPosition(share) & 4).toBe(4)
+    expect(share.compareDocumentPosition(startOver) & 4).toBe(4)
   })
 
   it('shows a feedback button once a form link is set', async () => {
@@ -1565,5 +1536,27 @@ describe('the bot check', () => {
     expect(rendered).toHaveLength(0)
     expect(screen.queryByText('Verifying...')).toBeNull()
     expect(cta().disabled).toBe(false)
+  })
+})
+
+describe('share link position', () => {
+  it('is the last block before Start over, below the disclaimer', async () => {
+    await openFull(full)
+    const disclaimer = screen.getByText(/Comparisons use candidates who submitted here/)
+    const share = screen.getByText('Keep this link to return to your result.')
+    const startOver = screen.getByText('Start over')
+    expect(disclaimer.compareDocumentPosition(share) & 4).toBe(4)
+    expect(share.compareDocumentPosition(startOver) & 4).toBe(4)
+  })
+
+  it('stays just above Start over while the comparison is locked', async () => {
+    vi.mocked(api.loadSubmission).mockResolvedValue({ input: INPUT, submission: submission(waiting(4)) })
+    addToHistory(entry(ID))
+    renderApp()
+    openHistory()
+    fireEvent.click(screen.getByText('546 points'))
+    await screen.findByText('Your score is saved')
+    const share = screen.getByText('Keep this link to return to your result.')
+    expect(share.compareDocumentPosition(screen.getByText('Start over')) & 4).toBe(4)
   })
 })

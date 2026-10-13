@@ -29,7 +29,6 @@ import { occupationDisplayName } from './occupationSearch'
 import { PartnerRequirements } from './PartnerRequirements'
 import { loadMinimized, saveMinimized } from './support'
 import { SECTION_SCORES, medianScore, topPercent, typicalFor } from './sectionScores'
-import { assessmentFor } from './assessment'
 import { Distribution } from './Distribution'
 import { Turnstile } from './Turnstile'
 
@@ -59,15 +58,12 @@ export function Results(props: {
   return (
     <section>
       <p className="text-sm text-stone-500">{t(exact ? 'res.title' : 'res.titleRange')}</p>
-      <div className="mt-1 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
-        <p className="flex flex-wrap items-baseline gap-x-2">
-          <span className="text-7xl font-semibold tracking-tight">
-            {exact ? low.total : `${low.total}-${high.total}`}
-          </span>
-          <span className="text-lg text-stone-400">{t('res.of', { max: high.max })}</span>
-        </p>
-        {analysisOpen && props.submission && <AssessmentBadge insights={props.submission.insights} />}
-      </div>
+      <p className="mt-1 flex flex-wrap items-baseline gap-x-2">
+        <span className="text-7xl font-semibold tracking-tight">
+          {exact ? low.total : `${low.total}-${high.total}`}
+        </span>
+        <span className="text-lg text-stone-400">{t('res.of', { max: high.max })}</span>
+      </p>
 
       {!analysisOpen && (
         <div className="mt-10">
@@ -325,11 +321,11 @@ function InsightsPanel(props: {
         <WaitingCard insights={insights} onRefresh={props.onRefresh} />
       )}
 
-      <ShareLink />
-
       {isRanked(overall) && <OccupationBreakdown insights={insights} result={props.result} />}
 
       <p className="text-xs leading-relaxed text-stone-400">{t('ins.disclaimer')}</p>
+
+      <ShareLink />
     </div>
   )
 }
@@ -365,22 +361,6 @@ function WaitingCard(props: { insights: Insights; onRefresh: () => Promise<void>
         {status === 'checking' ? t('wait.checking') : t('wait.check')}
       </button>
       {status === 'done' && <p className="mt-3 text-sm text-stone-500">{t('wait.stillWaiting')}</p>}
-    </div>
-  )
-}
-
-// A plain label for where the score sits among everyone who submitted, from the top 5% down to the rest.
-function AssessmentBadge({ insights }: { insights: Insights }) {
-  const { t } = useI18n()
-  const { overall } = insights
-  if (!isRanked(overall)) return null
-  const assessment = assessmentFor(topPercent(overall.percentile))
-  return (
-    <div className="pb-2 text-right">
-      <p className={`inline-block rounded-xl px-3.5 py-2 text-lg font-semibold tracking-tight ${assessment.tone}`}>
-        {t(`assess.${assessment.key}` as Key)}
-      </p>
-      <p className="mt-1 text-xs text-stone-500">{t('assess.note', { n: overall.n })}</p>
     </div>
   )
 }
