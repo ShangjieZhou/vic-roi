@@ -1,0 +1,5 @@
+project_id = "vic-roi"
+
+[functions.submissions]
+# Public calculator: the browser calls this with the anon key only, no user session.
+verify_jwt = false
