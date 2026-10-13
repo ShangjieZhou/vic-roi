@@ -88,15 +88,6 @@ export function removeFromHistory(id: string): HistoryEntry[] {
   return list
 }
 
-export function clearHistory(): void {
-  try {
-    localStorage.removeItem(HISTORY_KEY)
-    localStorage.removeItem(LEGACY_KEY)
-  } catch {
-    // Nothing to do.
-  }
-}
-
 export function timeAgo(savedAt: number, lang: 'en' | 'zh', now = Date.now()): string {
   const rtf = new Intl.RelativeTimeFormat(lang === 'zh' ? 'zh-CN' : 'en', { numeric: 'auto' })
   const seconds = Math.max(0, Math.round((now - savedAt) / 1000))

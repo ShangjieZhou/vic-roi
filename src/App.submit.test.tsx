@@ -60,7 +60,7 @@ const entry = (id: string, over: Partial<HistoryEntry> = {}): HistoryEntry => ({
 
 // The history is collapsed until its header is pressed.
 const openHistory = (zh = false) =>
-  fireEvent.click(screen.getByText(zh ? /^您的提交记录（\d+）$/ : /^Your submissions \(\d+\)$/))
+  fireEvent.click(screen.getByText(zh ? /^您的提交$/ : /^Your submission$/))
 // Result rows only. The footer also has a link.
 const rowLinks = () => screen.getAllByRole('link').filter((a) => a.getAttribute('href')?.startsWith('/r/'))
 
@@ -104,7 +104,7 @@ describe('submitting while fewer than 10 candidates have submitted overall', () 
         'You can stay on this page, or come back to this link later and refresh to see your analysis once enough candidates have submitted.',
       ),
     ).toBeTruthy()
-    expect(screen.getByText(/listed under Your submissions/)).toBeTruthy()
+    expect(screen.getByText(/listed under Your submission/)).toBeTruthy()
     expect(screen.getByText('Your submission is anonymous, so there is nothing to worry about while you wait.')).toBeTruthy()
     expect(screen.queryByText('Not enough data yet')).toBeNull()
     expect(screen.queryByText('Where you rank')).toBeNull()
@@ -157,11 +157,11 @@ describe('submission history', () => {
     addToHistory(entry(ID, { occupation: 'Registered Nurse' }))
     addToHistory(entry(ID2, { total: 810, location: 'offshore', savedAt: Date.now() - 60_000 }))
     renderApp()
-    const header = screen.getByText('Your submissions (2)')
+    const header = screen.getByText('Your submission')
     const question = screen.getByText('How old are you?')
     // DOCUMENT_POSITION_FOLLOWING (4): the history comes after the question.
     expect(question.compareDocumentPosition(header) & 4).toBe(4)
-    expect(screen.getByRole('button', { name: /Your submissions \(2\)/ }).getAttribute('aria-expanded')).toBe('false')
+    expect(screen.getByRole('button', { name: /^Your submission$/ }).getAttribute('aria-expanded')).toBe('false')
     expect(screen.queryByText('546 points')).toBeNull()
     expect(screen.queryByText('810 points')).toBeNull()
   })
@@ -171,7 +171,7 @@ describe('submission history', () => {
     addToHistory(entry(ID2, { total: 810, location: 'offshore', savedAt: Date.now() - 60_000 }))
     renderApp()
     openHistory()
-    expect(screen.getByRole('button', { name: /Your submissions \(2\)/ }).getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByRole('button', { name: /^Your submission$/ }).getAttribute('aria-expanded')).toBe('true')
     expect(screen.getByText('546 points')).toBeTruthy()
     expect(screen.getByText('810 points')).toBeTruthy()
     expect(screen.getByText('onshore · Registered Nurse')).toBeTruthy()
@@ -193,20 +193,20 @@ describe('submission history', () => {
     expect(rowLinks()).toHaveLength(5)
     openHistory()
     expect(screen.queryByText('600 points')).toBeNull()
-    expect(screen.getByRole('button', { name: /Your submissions \(5\)/ }).getAttribute('aria-expanded')).toBe('false')
+    expect(screen.getByRole('button', { name: /^Your submission$/ }).getAttribute('aria-expanded')).toBe('false')
   })
 
-  it('no longer opens the home screen with a privacy banner, and stresses anonymity inside the history', () => {
+  it('no longer opens the home screen with a privacy banner or an anonymity note in the history', () => {
     addToHistory(entry(ID))
     renderApp()
     expect(screen.queryByText(/Free to use/)).toBeNull()
     openHistory()
-    expect(screen.getByText(/Every submission is anonymous: no name or email is attached/)).toBeTruthy()
+    expect(screen.queryByText(/Every submission is anonymous/)).toBeNull()
   })
 
   it('shows nothing extra for a first-time visitor', () => {
     renderApp()
-    expect(screen.queryByText(/Your submissions/)).toBeNull()
+    expect(screen.queryByText(/^Your submission$/)).toBeNull()
     expect(screen.queryByText(/Free to use/)).toBeNull()
     expect(screen.getByText('How old are you?')).toBeTruthy()
   })
@@ -221,7 +221,7 @@ describe('submission history', () => {
     expect(screen.getByText('Your score in each section')).toBeTruthy()
     expect(api.loadSubmission).toHaveBeenCalledWith(ID)
     expect(window.location.pathname).toBe(`/r/${ID}`)
-    expect(screen.getByText('‹ My submissions')).toBeTruthy()
+    expect(screen.getByText('‹ My submission')).toBeTruthy()
   })
 
   it('opens a past submission that is still waiting for enough candidates', async () => {
@@ -242,8 +242,8 @@ describe('submission history', () => {
     fireEvent.click(screen.getByText('546 points'))
     await screen.findByText('Where you rank')
 
-    fireEvent.click(screen.getByText('‹ My submissions'))
-    expect(await screen.findByText('Your submissions (1)')).toBeTruthy()
+    fireEvent.click(screen.getByText('‹ My submission'))
+    expect(await screen.findByText('Your submission')).toBeTruthy()
     expect(window.location.pathname).toBe('/')
 
     // Forward to the result again, then Back.
@@ -252,7 +252,7 @@ describe('submission history', () => {
     await screen.findByText('Where you rank')
     window.history.pushState(null, '', '/')
     window.dispatchEvent(new PopStateEvent('popstate'))
-    expect(await screen.findByText('Your submissions (1)')).toBeTruthy()
+    expect(await screen.findByText('Your submission')).toBeTruthy()
     expect(screen.queryByText('Where you rank')).toBeNull()
   })
 
@@ -264,21 +264,19 @@ describe('submission history', () => {
     expect(loadHistory().map((e) => e.id)).toEqual([ID, ID2])
   })
 
-  it('clears the list on this device only', () => {
+  it('has no way to clear the list and no device-only note', () => {
     addToHistory(entry(ID))
     renderApp()
     openHistory()
-    expect(screen.getByText('This only removes the list from this device.')).toBeTruthy()
-    fireEvent.click(screen.getByText('Clear this list'))
-    expect(screen.queryByText(/Your submissions/)).toBeNull()
-    expect(loadHistory()).toEqual([])
+    expect(screen.queryByText('Clear this list')).toBeNull()
+    expect(screen.queryByText(/Saved on this device only/)).toBeNull()
   })
 
   it('shows the history in Chinese', () => {
     localStorage.setItem('vpt-lang', 'zh')
     addToHistory(entry(ID, { occupation: '护士' }))
     renderApp()
-    expect(screen.getByText('您的提交记录（1）')).toBeTruthy()
+    expect(screen.getByText('您的提交')).toBeTruthy()
     openHistory(true)
     expect(screen.getByText('546 分')).toBeTruthy()
     expect(screen.getByText('境内 · 护士')).toBeTruthy()
@@ -288,7 +286,7 @@ describe('submission history', () => {
     addToHistory(entry(ID))
     renderApp()
     type('How old are you?', '30')
-    expect(screen.queryByText(/Your submissions/)).toBeNull()
+    expect(screen.queryByText(/^Your submission$/)).toBeNull()
   })
 })
 
@@ -388,7 +386,7 @@ describe('the analysis page', () => {
         'Age', 'English language', 'Experience in nominated occupation', 'Education',
         'Occupation skill level', "Partner's skill", 'Victorian skilled earnings',
       ]) {
-        expect(screen.getByText(label), label).toBeTruthy()
+        expect(screen.getAllByText(label).length, label).toBeGreaterThan(0)
       }
       // One bar per possible score: 19 + 3 + 6 + 4 + 2 + 2 + 20.
       expect(screen.getAllByTitle(/ at \d+ points$/)).toHaveLength(56)
@@ -454,7 +452,7 @@ describe('the analysis page', () => {
       openHistory()
       fireEvent.click(screen.getByText('546 points'))
       await screen.findByText('Where you rank')
-      expect(screen.getByText('Victorian skilled earnings')).toBeTruthy()
+      expect(screen.getAllByText('Victorian skilled earnings').length).toBeGreaterThan(0)
       expect(screen.getByTitle('7 candidates at 0 points').className).toContain('bg-accent')
     })
 
@@ -488,9 +486,10 @@ describe('the analysis page', () => {
     expect(screen.getByText('Not claimed')).toBeTruthy()
   })
 
-  it('swaps the simple score bars for the charts once the analysis opens', async () => {
+  it('moves the score bars into a breakdown section once the analysis opens', async () => {
     await open(withCharts)
-    expect(screen.queryByText('Not claimed')).toBeNull()
+    expect(screen.getByText('Your score breakdown')).toBeTruthy()
+    expect(screen.getAllByText('Not claimed')).toHaveLength(1) // one set of bars, not two
     expect(screen.getByText('Your score in each section')).toBeTruthy()
   })
 })

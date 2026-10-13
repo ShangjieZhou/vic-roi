@@ -1,5 +1,4 @@
 import { useId, useState } from 'react'
-import { LockIcon } from './icons'
 import { useI18n, type Key } from './i18n'
 import { occupationDisplayName } from './occupationSearch'
 import { timeAgo, type HistoryEntry } from './saved'
@@ -19,12 +18,11 @@ function Chevron({ open }: { open: boolean }) {
   )
 }
 
-// The visitor's earlier submissions on this device, collapsed until they ask for it. Each row opens that
+// The visitor's submission on this device, collapsed until they ask for it. Each row opens that
 // result with its full analysis.
 export function HistoryList(props: {
   entries: HistoryEntry[]
   onOpen: (id: string) => void
-  onClear: () => void
 }) {
   const { t, lang } = useI18n()
   const [open, setOpen] = useState(false)
@@ -39,17 +37,12 @@ export function HistoryList(props: {
         aria-controls={panelId}
         className="flex min-h-14 w-full items-center justify-between gap-3 text-left"
       >
-        <span className="text-base font-semibold tracking-tight">{t('hist.titleCount', { n: props.entries.length })}</span>
+        <span className="text-base font-semibold tracking-tight">{t('hist.title')}</span>
         <Chevron open={open} />
       </button>
 
       {open && (
         <div id={panelId} className="pb-2">
-          <p className="flex items-start gap-1.5 text-xs leading-relaxed text-stone-500">
-            <LockIcon className="mt-0.5 size-3.5 text-emerald-700" />
-            <span>{t('hist.sub')}</span>
-          </p>
-
           <ul className="mt-3 grid gap-2">
             {props.entries.map((e) => (
               <li key={e.id}>
@@ -80,14 +73,6 @@ export function HistoryList(props: {
             ))}
           </ul>
 
-          <button
-            onClick={props.onClear}
-            title={t('hist.clearNote')}
-            className="mt-1 min-h-11 text-sm text-stone-500 active:text-stone-900"
-          >
-            {t('hist.clear')}
-          </button>
-          <p className="text-xs text-stone-400">{t('hist.clearNote')}</p>
         </div>
       )}
     </section>

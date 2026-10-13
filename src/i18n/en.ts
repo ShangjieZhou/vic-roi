@@ -110,18 +110,16 @@ export const en = {
   'wait.stay':
     'You can stay on this page, or come back to this link later and refresh to see your analysis once enough candidates have submitted.',
   'wait.anon': 'Your submission is anonymous, so there is nothing to worry about while you wait.',
-  'wait.device': 'Your result is also listed under Your submissions on the home page of this device, so you can find it again if you close this tab.',
+  'wait.device': 'Your result is also listed under Your submission on the home page of this device, so you can find it again if you close this tab.',
   'wait.check': 'Check again',
   'wait.checking': 'Checking...',
   'wait.stillWaiting': 'Still waiting for more candidates. Check again later.',
 
-  'hist.title': 'Your submissions',
-  'hist.sub': 'Saved on this device only. Every submission is anonymous: no name or email is attached.',
+  'hist.title': 'Your submission',
+  'res.breakdown': 'Your score breakdown',
   'hist.points': '{total} points',
   'hist.noOcc': 'No occupation given',
-  'hist.clear': 'Clear this list',
-  'hist.clearNote': 'This only removes the list from this device.',
-  'hist.back': 'My submissions',
+  'hist.back': 'My submission',
 
   'ins.pct': 'Top {p}%',
   'ins.pctNote':
@@ -140,7 +138,6 @@ export const en = {
   'occ.listHint': 'Search the official list by name or ANZSCO code.',
   'wait.body': (p) =>
     `Comparisons unlock once ${p.min} candidates have submitted. So far ${p.n} ${plural(p.n, 'has', 'have')}, including you.`,
-  'hist.titleCount': 'Your submissions ({n})',
   'cmp.all': 'All candidates',
   'cmp.onshore': 'Onshore candidates',
   'cmp.offshore': 'Offshore candidates',

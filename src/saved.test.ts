@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it } from 'vitest'
-import { addToHistory, clearHistory, loadHistory, removeFromHistory, timeAgo, type HistoryEntry } from './saved'
+import { addToHistory, loadHistory, removeFromHistory, timeAgo, type HistoryEntry } from './saved'
 
 const entry = (n: number, over: Partial<HistoryEntry> = {}): HistoryEntry => ({
   id: `2ceb142f-cccc-4081-834a-13${String(n).padStart(10, '0')}`,
@@ -31,12 +31,11 @@ describe('submission history', () => {
     expect(loadHistory()[0].total).toBe(999)
   })
 
-  it('removes one entry, then clears everything', () => {
+  it('removes one entry', () => {
     addToHistory(entry(1))
     addToHistory(entry(2))
     expect(removeFromHistory(entry(1).id).map((e) => e.total)).toEqual([502])
-    clearHistory()
-    expect(loadHistory()).toEqual([])
+    expect(loadHistory().map((e) => e.total)).toEqual([502])
   })
 
   it('keeps only the 50 most recent entries', () => {

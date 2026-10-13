@@ -12,7 +12,7 @@ import { HistoryList } from './History'
 import { useI18n, type Key, type Lang } from './i18n'
 import { PartnerRequirements } from './PartnerRequirements'
 import { Results } from './Results'
-import { addToHistory, clearHistory, loadHistory, removeFromHistory, type HistoryEntry } from './saved'
+import { addToHistory, loadHistory, removeFromHistory, type HistoryEntry } from './saved'
 
 type Answers = Partial<VptDraft>
 type Choice<T> = { value: T; label: Key; hint?: Key }
@@ -201,10 +201,6 @@ export function App() {
                 onOpen={(id) => {
                   go(`/r/${id}`)
                   showResult(id)
-                }}
-                onClear={() => {
-                  clearHistory()
-                  setHistory([])
                 }}
               />
             )}

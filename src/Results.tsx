@@ -62,40 +62,15 @@ export function Results(props: {
       </p>
 
       {!analysisOpen && (
-        <ul className="mt-10 grid gap-5">
-          {low.categories.map((c, i) => {
-            const top = high.categories[i].points
-            return (
-              <li key={c.key}>
-                <div className="flex items-baseline justify-between text-sm">
-                  <span className="font-medium">{t(`cat.${c.key}` as Key)}</span>
-                  <span className="tabular-nums text-stone-500">
-                    {c.points === top ? c.points : t('res.to', { a: c.points, b: top })}{' '}
-                    <span className="text-stone-300">/ {c.max}</span>
-                  </span>
-                </div>
-                <div className="relative mt-2 h-2 overflow-hidden rounded-full bg-stone-200">
-                  {top > c.points && (
-                    <div
-                      className="absolute inset-y-0 left-0 rounded-full bg-indigo-200"
-                      style={{ width: `${(top / c.max) * 100}%` }}
-                    />
-                  )}
-                  <div
-                    className="absolute inset-y-0 left-0 rounded-full bg-accent transition-all duration-500"
-                    style={{ width: `${(c.points / c.max) * 100}%` }}
-                  />
-                </div>
-                {c.key === 'earnings' && <p className="mt-1 text-xs text-stone-400">{earningsNote}</p>}
-              </li>
-            )
-          })}
-        </ul>
+        <div className="mt-10">
+          <ScoreBreakdown low={low} high={high} earningsNote={earningsNote} />
+        </div>
       )}
 
       {props.submission && resolved ? (
         <InsightsPanel
           input={resolved}
+          earningsNote={earningsNote}
           result={calculateVpt(resolved)}
           submission={props.submission}
           onRefresh={props.onRefresh}
@@ -113,6 +88,42 @@ export function Results(props: {
         {t('res.startOver')}
       </button>
     </section>
+  )
+}
+
+// The score in each section as a filled bar. A range shows the lowest score solid and the highest lighter.
+function ScoreBreakdown({ low, high, earningsNote }: { low: VptResult; high: VptResult; earningsNote: string }) {
+  const { t } = useI18n()
+  return (
+    <ul className="grid gap-5">
+      {low.categories.map((c, i) => {
+        const top = high.categories[i].points
+        return (
+          <li key={c.key}>
+            <div className="flex items-baseline justify-between text-sm">
+              <span className="font-medium">{t(`cat.${c.key}` as Key)}</span>
+              <span className="tabular-nums text-stone-500">
+                {c.points === top ? c.points : t('res.to', { a: c.points, b: top })}{' '}
+                <span className="text-stone-300">/ {c.max}</span>
+              </span>
+            </div>
+            <div className="relative mt-2 h-2 overflow-hidden rounded-full bg-stone-200">
+              {top > c.points && (
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full bg-indigo-200"
+                  style={{ width: `${(top / c.max) * 100}%` }}
+                />
+              )}
+              <div
+                className="absolute inset-y-0 left-0 rounded-full bg-accent transition-all duration-500"
+                style={{ width: `${(c.points / c.max) * 100}%` }}
+              />
+            </div>
+            {c.key === 'earnings' && <p className="mt-1 text-xs text-stone-400">{earningsNote}</p>}
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 
@@ -280,6 +291,7 @@ function SubmitCard(props: {
 
 function InsightsPanel(props: {
   input: VptInput
+  earningsNote: string
   result: VptResult
   submission: Submission
   onRefresh: () => Promise<void>
@@ -294,6 +306,10 @@ function InsightsPanel(props: {
         <>
           <PercentileBar insights={insights} />
           <Comparison insights={insights} />
+          <section>
+            <h3 className="mb-4 text-lg font-semibold tracking-tight">{t('res.breakdown')}</h3>
+            <ScoreBreakdown low={props.result} high={props.result} earningsNote={props.earningsNote} />
+          </section>
           <SectionCharts result={props.result} overall={overall} />
         </>
       ) : (
