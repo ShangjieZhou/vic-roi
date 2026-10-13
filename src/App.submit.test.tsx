@@ -58,9 +58,11 @@ const entry = (id: string, over: Partial<HistoryEntry> = {}): HistoryEntry => ({
   id, total: 546, location: 'onshore', occupation: null, occupationCode: null, savedAt: Date.now() - 3 * 86_400_000, ...over,
 })
 
-// The history is collapsed until its header is pressed.
-const openHistory = (zh = false) =>
-  fireEvent.click(screen.getByText(zh ? /^您的提交$/ : /^Your submission$/))
+// The history starts expanded. This opens it only if a test has collapsed it.
+const openHistory = (zh = false) => {
+  const header = screen.getByText(zh ? /^您的提交$/ : /^Your submission$/)
+  if (header.closest('button')?.getAttribute('aria-expanded') !== 'true') fireEvent.click(header)
+}
 // Result rows only. The footer also has a link.
 const rowLinks = () => screen.getAllByRole('link').filter((a) => a.getAttribute('href')?.startsWith('/r/'))
 
@@ -153,7 +155,7 @@ describe('submitting while fewer than 10 candidates have submitted overall', () 
 })
 
 describe('submission history', () => {
-  it('sits below the question and starts collapsed, showing only how many submissions there are', () => {
+  it('sits below the question and starts expanded', () => {
     addToHistory(entry(ID, { occupation: 'Registered Nurse' }))
     addToHistory(entry(ID2, { total: 810, location: 'offshore', savedAt: Date.now() - 60_000 }))
     renderApp()
@@ -161,12 +163,12 @@ describe('submission history', () => {
     const question = screen.getByText('How old are you?')
     // DOCUMENT_POSITION_FOLLOWING (4): the history comes after the question.
     expect(question.compareDocumentPosition(header) & 4).toBe(4)
-    expect(screen.getByRole('button', { name: /^Your submission$/ }).getAttribute('aria-expanded')).toBe('false')
-    expect(screen.queryByText('546 points')).toBeNull()
-    expect(screen.queryByText('810 points')).toBeNull()
+    expect(screen.getByRole('button', { name: /^Your submission$/ }).getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByText('546 points')).toBeTruthy()
+    expect(screen.getByText('810 points')).toBeTruthy()
   })
 
-  it('expands to list each submission with score, group, occupation and age, newest first', () => {
+  it('lists each submission with score, group, occupation and age, newest first', () => {
     addToHistory(entry(ID, { occupation: 'Registered Nurse' }))
     addToHistory(entry(ID2, { total: 810, location: 'offshore', savedAt: Date.now() - 60_000 }))
     renderApp()
@@ -184,14 +186,13 @@ describe('submission history', () => {
     expect(screen.getByText('How old are you?')).toBeTruthy()
   })
 
-  it('collapses again, and shows every entry when expanded', () => {
+  it('shows every entry, and collapses when the header is pressed', () => {
     for (let n = 0; n < 5; n++) {
       addToHistory(entry(`9a1b2c3d-1111-4222-8333-44445555000${n}`, { total: 600 + n, savedAt: Date.now() - n * 1000 }))
     }
     renderApp()
-    openHistory()
     expect(rowLinks()).toHaveLength(5)
-    openHistory()
+    fireEvent.click(screen.getByText('Your submission'))
     expect(screen.queryByText('600 points')).toBeNull()
     expect(screen.getByRole('button', { name: /^Your submission$/ }).getAttribute('aria-expanded')).toBe('false')
   })

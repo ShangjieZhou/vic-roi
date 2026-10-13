@@ -18,14 +18,14 @@ function Chevron({ open }: { open: boolean }) {
   )
 }
 
-// The visitor's submission on this device, collapsed until they ask for it. Each row opens that
+// The visitor's submission on this device, expanded by default and can be collapsed. Each row opens that
 // result with its full analysis.
 export function HistoryList(props: {
   entries: HistoryEntry[]
   onOpen: (id: string) => void
 }) {
   const { t, lang } = useI18n()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(true)
   const panelId = useId()
 
   return (
