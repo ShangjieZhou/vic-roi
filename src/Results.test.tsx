@@ -10,7 +10,7 @@ const draft: VptDraft = {
 
 const render = (d: VptDraft) =>
   renderToStaticMarkup(
-    <Results draft={d} submission={null} onRefine={() => {}} onRefresh={async () => {}} onSubmitted={() => {}} onRestart={() => {}} />,
+    <Results draft={d} submission={null} onRefine={() => {}} onRefresh={async () => {}} onSubmitted={() => {}} onOpen={() => {}} onRestart={() => {}} />,
   )
 
 describe('Results', () => {

@@ -23,13 +23,26 @@ export interface Submission {
 export type OccupationChoice = { kind: 'listed'; code: string } | { kind: 'free'; text: string }
 
 export type SubmitOutcome =
-  | { status: 'ok'; submission: Submission }
-  // A hard limit on how many results one device can submit. It does not reset.
-  | { status: 'device_limit'; limit: number }
+  // replaced lists any earlier submission from this device that this one withdrew.
+  | { status: 'ok'; submission: Submission; replaced: string[] }
+  // This device already has a submission. Nothing was changed. Submitting again needs replace: true.
+  | { status: 'already_submitted'; existing: { id: string; total: number } }
+  | { status: 'bot_check_failed' }
   | { status: 'invalid_occupation' }
   | { status: 'error' }
 
-export async function submitScore(input: VptInput, occupation: OccupationChoice | null): Promise<SubmitOutcome> {
+export interface SubmitOptions {
+  // The Cloudflare Turnstile token, when the bot check is on.
+  turnstileToken?: string | null
+  // Withdraw this device's current submission (deleting it) and save this one in its place.
+  replace?: boolean
+}
+
+export async function submitScore(
+  input: VptInput,
+  occupation: OccupationChoice | null,
+  options: SubmitOptions = {},
+): Promise<SubmitOutcome> {
   if (!endpoint) return { status: 'error' }
   try {
     const res = await fetch(endpoint, {
@@ -38,16 +51,22 @@ export async function submitScore(input: VptInput, occupation: OccupationChoice 
       body: JSON.stringify({
         input,
         deviceId: getDeviceId(),
+        turnstileToken: options.turnstileToken || undefined,
+        replace: options.replace ? true : undefined,
         occupationCode: occupation?.kind === 'listed' ? occupation.code : undefined,
         occupation: occupation?.kind === 'free' ? occupation.text.trim() || undefined : undefined,
       }),
     })
     const body = await res.json().catch(() => ({}))
-    if (res.status === 403 && body.error === 'device_limit') return { status: 'device_limit', limit: Number(body.limit) || 5 }
+    if (res.status === 409 && body.error === 'already_submitted' && body.existing?.id) {
+      return { status: 'already_submitted', existing: { id: body.existing.id, total: Number(body.existing.total) } }
+    }
+    if (res.status === 403 && body.error === 'bot_check_failed') return { status: 'bot_check_failed' }
     if (res.status === 400 && body.error === 'invalid_occupation') return { status: 'invalid_occupation' }
     if (!res.ok) return { status: 'error' }
     return {
       status: 'ok',
+      replaced: Array.isArray(body.replaced) ? body.replaced : [],
       submission: {
         id: body.id,
         occupation: body.insights?.occupation?.name ?? null,

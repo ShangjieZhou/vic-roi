@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Insights } from '../supabase/functions/_shared/insights'
 import { App } from './App'
@@ -94,7 +94,7 @@ afterEach(() => {
 
 describe('submitting while fewer than 10 candidates have submitted overall', () => {
   it('explains the wait, offers to come back later, and remembers the result on this device', async () => {
-    vi.mocked(api.submitScore).mockResolvedValue({ status: 'ok', submission: submission(waiting(3)) })
+    vi.mocked(api.submitScore).mockResolvedValue({ status: 'ok', replaced: [], submission: submission(waiting(3)) })
     submitFromScratch()
 
     await screen.findByText('Your score is saved')
@@ -108,7 +108,7 @@ describe('submitting while fewer than 10 candidates have submitted overall', () 
     expect(screen.getByText('Your submission is anonymous, so there is nothing to worry about while you wait.')).toBeTruthy()
     expect(screen.queryByText('Not enough data yet')).toBeNull()
     expect(screen.queryByText('Where you rank')).toBeNull()
-    expect(screen.queryByText('Your percentile')).toBeNull()
+    expect(screen.queryByText('Your ranking')).toBeNull()
 
     expect(window.location.pathname).toBe(`/r/${ID}`)
     expect(loadHistory()).toEqual([
@@ -117,7 +117,7 @@ describe('submitting while fewer than 10 candidates have submitted overall', () 
   })
 
   it('"Check again" says still waiting, then reveals the analysis once the pool is big enough', async () => {
-    vi.mocked(api.submitScore).mockResolvedValue({ status: 'ok', submission: submission(waiting(4)) })
+    vi.mocked(api.submitScore).mockResolvedValue({ status: 'ok', replaced: [], submission: submission(waiting(4)) })
     submitFromScratch()
     await screen.findByText('Your score is saved')
 
@@ -135,7 +135,7 @@ describe('submitting while fewer than 10 candidates have submitted overall', () 
 
   it('shows the waiting message in Chinese', async () => {
     localStorage.setItem('vpt-lang', 'zh')
-    vi.mocked(api.submitScore).mockResolvedValue({ status: 'ok', submission: submission(waiting(3)) })
+    vi.mocked(api.submitScore).mockResolvedValue({ status: 'ok', replaced: [], submission: submission(waiting(3)) })
     renderApp()
     type('您的年龄是？', '30')
     pick('熟练（Proficient）')
@@ -258,7 +258,7 @@ describe('submission history', () => {
 
   it('adds each new submission to the list, newest first, without duplicates', async () => {
     addToHistory(entry(ID2, { total: 700, savedAt: Date.now() - 86_400_000 }))
-    vi.mocked(api.submitScore).mockResolvedValue({ status: 'ok', submission: submission(waiting(3)) })
+    vi.mocked(api.submitScore).mockResolvedValue({ status: 'ok', replaced: [], submission: submission(waiting(3)) })
     submitFromScratch()
     await screen.findByText('Your score is saved')
     expect(loadHistory().map((e) => e.id)).toEqual([ID, ID2])
@@ -347,7 +347,7 @@ describe('the analysis page', () => {
     it('ranks the candidate among everyone and shows the median and the average', async () => {
       await open(withCharts)
       expect(screen.getByText('Among all 12 submitted candidates')).toBeTruthy()
-      expect(screen.getAllByText('You: 55th percentile').length).toBeGreaterThan(0)
+      expect(screen.getAllByText('You: top 45%').length).toBeGreaterThan(0)
       expect(screen.getByText('Your score').nextSibling?.textContent).toBe('546')
       expect(screen.getByText('Median').nextSibling?.textContent).toBe('520')
       expect(screen.getByText('Average').nextSibling?.textContent).toBe('530')
@@ -357,7 +357,7 @@ describe('the analysis page', () => {
 
     it('places the candidate at their percentile, the median at 50 and the average at its own percentile', async () => {
       await open(withCharts)
-      const bar = screen.getByRole('img', { name: 'You: 55th percentile' })
+      const bar = screen.getByRole('img', { name: 'You: top 45%' })
       const at = (pct: number) => bar.querySelector(`[style*="left: ${pct}%"]`)
       expect(at(55)).toBeTruthy() // the candidate
       expect(at(50)).toBeTruthy() // the median, by definition
@@ -372,7 +372,7 @@ describe('the analysis page', () => {
     it('is shown in Chinese', async () => {
       await open(withCharts, 'zh')
       expect(screen.getByText('在全部 12 位已提交的候选人中')).toBeTruthy()
-      expect(screen.getAllByText('您：第 55 百分位').length).toBeGreaterThan(0)
+      expect(screen.getAllByText('您：前45%').length).toBeGreaterThan(0)
       expect(screen.getByText('您的分数')).toBeTruthy()
       expect(screen.getByText('中位数')).toBeTruthy()
       expect(screen.getByText('平均分')).toBeTruthy()
@@ -383,15 +383,15 @@ describe('the analysis page', () => {
     it('draws one bar chart per section, with a bar for each score', async () => {
       await open(withCharts)
       expect(screen.getByText('Your score in each section')).toBeTruthy()
-      expect(screen.getByText('Bars show how many candidates scored each value. Your score is highlighted.')).toBeTruthy()
+      expect(screen.getByText('Bars show how many candidates scored each value. Your score is highlighted, and a dark mark shows the median.')).toBeTruthy()
       for (const label of [
         'Age', 'English language', 'Experience in nominated occupation', 'Education',
         'Occupation skill level', "Partner's skill", 'Victorian skilled earnings',
       ]) {
         expect(screen.getByText(label), label).toBeTruthy()
       }
-      // One bar per distinct score: 2 + 3 + 3 + 2 + 2 + 2 + 3.
-      expect(screen.getAllByTitle(/ at \d+ points$/)).toHaveLength(17)
+      // One bar per possible score: 19 + 3 + 6 + 4 + 2 + 2 + 20.
+      expect(screen.getAllByTitle(/ at \d+ points$/)).toHaveLength(56)
     })
 
     it('highlights the candidate\'s own score and shows how many candidates got each score', async () => {
@@ -409,20 +409,37 @@ describe('the analysis page', () => {
       expect(screen.getByTitle('4 candidates at 286 points').getAttribute('style')).toContain('height: 50%')
     })
 
-    it('shows the percentile and the average under each section', async () => {
+    it('shows the top percent and the median under each section', async () => {
       await open(withCharts)
       for (const text of [
-        '78th percentile · Average 268', '21st percentile · Average 90', '40th percentile · Average 45',
-        '33rd percentile · Average 60', '63rd percentile · Average 37', '47th percentile · Average 3',
-        '87th percentile · Average 53',
+        'Top 22% · Median 300', 'Top 79% · Median 100', 'Top 60% · Median 60',
+        'Top 67% · Median 50', 'Top 37% · Median 50', 'Top 53% · Median 0',
+        'Top 13% · Median 0',
       ]) {
         expect(screen.getByText(text), text).toBeTruthy()
       }
     })
 
-    it('explains how percentiles treat ties', async () => {
+    it('shows a bar for every possible score, including ones nobody has', async () => {
       await open(withCharts)
-      expect(screen.getByText(/Percentile is the share of candidates who scored lower than you, plus half of those who tied/)).toBeTruthy()
+      // English can give 0, 100 or 200 and education 25, 50, 75 or 100: nobody has education 25 or 100.
+      expect(screen.getAllByTitle('0 candidates at 25 points')[0]).toBeTruthy()
+      // Age has no bar merged away: 0 and every score from 16 to 300 appear.
+      expect(screen.getAllByTitle('0 candidates at 16 points')[0]).toBeTruthy()
+      expect(screen.getByTitle('0 candidates at 265 points')).toBeTruthy()
+      // Earnings: 0 plus the 19 bands.
+      expect(screen.getAllByTitle('0 candidates at 150 points')[0]).toBeTruthy()
+    })
+
+    it('marks the bar at the median score', async () => {
+      await open(withCharts)
+      const marks = document.querySelectorAll('[data-median="true"]')
+      expect(marks).toHaveLength(7)
+    })
+
+    it('explains how the top percent treats ties', async () => {
+      await open(withCharts)
+      expect(screen.getByText(/Top xx% is the share of candidates who scored higher than you, plus half of those who tied/)).toBeTruthy()
     })
 
     it('scores an offshore candidate 0 income points, on the same chart as everyone else', async () => {
@@ -443,16 +460,16 @@ describe('the analysis page', () => {
       await open(ranked)
       expect(screen.getByText('Your score in each section')).toBeTruthy()
       expect(screen.queryByTitle(/ at \d+ points$/)).toBeNull()
-      expect(screen.queryByText(/percentile · Average/)).toBeNull()
-      expect(screen.queryByText(/Percentile is the share/)).toBeNull()
+      expect(screen.queryByText(/Top \d+% · Median/)).toBeNull()
+      expect(screen.queryByText(/Top xx% is the share/)).toBeNull()
     })
 
     it('is shown in Chinese', async () => {
       await open(withCharts, 'zh')
       expect(screen.getByText('各部分得分分布')).toBeTruthy()
-      expect(screen.getByText('第 78 百分位 · 平均 268')).toBeTruthy()
+      expect(screen.getByText('前22% · 中位数 300')).toBeTruthy()
       expect(screen.getByTitle('286 分：4 位候选人')).toBeTruthy()
-      expect(screen.getByText(/百分位 = 得分低于您的候选人比例/)).toBeTruthy()
+      expect(screen.getByText(/“前xx%”表示得分高于您的候选人所占比例/)).toBeTruthy()
     })
   })
 
@@ -463,7 +480,7 @@ describe('the analysis page', () => {
     openHistory()
     fireEvent.click(screen.getByText('546 points'))
     await screen.findByText('Your score is saved')
-    expect(screen.queryByText(/percentile/)).toBeNull()
+    expect(screen.queryByText(/Top \d+%/)).toBeNull()
     expect(screen.queryByText('Your score in each section')).toBeNull()
     // The simple score bars are still there, including the earnings note.
     expect(screen.getByText('Not claimed')).toBeTruthy()
@@ -478,7 +495,7 @@ describe('the analysis page', () => {
 
 describe('choosing an occupation when submitting', () => {
   const okResult = () =>
-    vi.mocked(api.submitScore).mockResolvedValue({ status: 'ok', submission: submission(waiting(3)) })
+    vi.mocked(api.submitScore).mockResolvedValue({ status: 'ok', replaced: [], submission: submission(waiting(3)) })
 
   it('submits the code of a listed occupation', async () => {
     okResult()
@@ -490,6 +507,7 @@ describe('choosing an occupation when submitting', () => {
     expect(api.submitScore).toHaveBeenCalledWith(
       expect.objectContaining({ location: 'onshore' }),
       { kind: 'listed', code: '261313' },
+      { turnstileToken: null, replace: false },
     )
   })
 
@@ -500,7 +518,7 @@ describe('choosing an occupation when submitting', () => {
     fireEvent.click(screen.getByText('Use "Barista" (not in the list)'))
     fireEvent.click(screen.getByText(CTA))
     await screen.findByText('Your score is saved')
-    expect(api.submitScore).toHaveBeenCalledWith(expect.anything(), { kind: 'free', text: 'Barista' })
+    expect(api.submitScore).toHaveBeenCalledWith(expect.anything(), { kind: 'free', text: 'Barista' }, { turnstileToken: null, replace: false })
   })
 
   it('submits without an occupation when none is chosen', async () => {
@@ -508,12 +526,13 @@ describe('choosing an occupation when submitting', () => {
     reachSubmitCard()
     fireEvent.click(screen.getByText(CTA))
     await screen.findByText('Your score is saved')
-    expect(api.submitScore).toHaveBeenCalledWith(expect.anything(), null)
+    expect(api.submitScore).toHaveBeenCalledWith(expect.anything(), null, { turnstileToken: null, replace: false })
   })
 
   it('remembers the occupation code in the history, and shows it in the visitor language', async () => {
     vi.mocked(api.submitScore).mockResolvedValue({
       status: 'ok',
+      replaced: [],
       submission: { id: ID, occupation: 'Software engineer', occupationCode: '261313', insights: waiting(3) },
     })
     reachSubmitCard()
@@ -554,11 +573,11 @@ describe('your percentile in three contexts', () => {
 
   it('shows the percentile for all candidates, the occupation and the location status', async () => {
     await open(threeContexts)
-    await screen.findByText('Your percentile')
+    await screen.findByText('Your ranking')
     for (const text of [
-      'All candidates', '23 candidates', '54th percentile',
-      'Software engineer', '9 candidates', '93rd percentile',
-      'Onshore candidates', '15 candidates', '60th percentile',
+      'All candidates', '23 candidates', 'Top 46%',
+      'Software engineer', '9 candidates', 'Top 7%',
+      'Onshore candidates', '15 candidates', 'Top 40%',
     ]) {
       expect(screen.getByText(text), text).toBeTruthy()
     }
@@ -566,7 +585,7 @@ describe('your percentile in three contexts', () => {
 
   it('lists them in that order and shows no other group', async () => {
     await open(threeContexts)
-    await screen.findByText('Your percentile')
+    await screen.findByText('Your ranking')
     const order = ['All candidates', 'Software engineer', 'Onshore candidates'].map((label) => screen.getByText(label))
     // DOCUMENT_POSITION_FOLLOWING (4)
     expect(order[0].compareDocumentPosition(order[1]) & 4).toBe(4)
@@ -581,21 +600,21 @@ describe('your percentile in three contexts', () => {
       locationGroup: { n: 2, percentile: 75, median: 500 },
       occupation: { name: 'Software engineer', code: '261313', n: 2, percentile: 75, median: 500 },
     })
-    await screen.findByText('Your percentile')
+    await screen.findByText('Your ranking')
     expect(screen.getAllByText('2 candidates')).toHaveLength(2)
-    expect(screen.getAllByText('75th percentile')).toHaveLength(2)
+    expect(screen.getAllByText('Top 25%')).toHaveLength(2)
   })
 
   it('says so when the candidate is the first in their occupation', async () => {
     await open({ ...threeContexts, occupation: { name: 'Software engineer', code: '261313', n: 1 } })
-    await screen.findByText('Your percentile')
+    await screen.findByText('Your ranking')
     expect(screen.getByText('1 candidate')).toBeTruthy()
     expect(screen.getByText('You are the first so far')).toBeTruthy()
   })
 
   it('leaves out the location row when everyone is in the same location', async () => {
     await open({ ...threeContexts, locationGroup: { n: 23, percentile: 54, median: 536 } })
-    await screen.findByText('Your percentile')
+    await screen.findByText('Your ranking')
     expect(screen.queryByText('Onshore candidates')).toBeNull()
     expect(screen.getByText('All candidates')).toBeTruthy()
   })
@@ -607,16 +626,16 @@ describe('your percentile in three contexts', () => {
       locationGroup: { n: 2, percentile: 75, median: 500 },
       occupation: null,
     })
-    await screen.findByText('Your percentile')
+    await screen.findByText('Your ranking')
     expect(screen.queryByText('Your score is saved')).toBeNull()
     expect(screen.getByText('Offshore candidates')).toBeTruthy()
     expect(screen.getByText('2 candidates')).toBeTruthy()
-    expect(screen.getByText('75th percentile')).toBeTruthy()
+    expect(screen.getByText('Top 25%')).toBeTruthy()
   })
 
   it('shows only the overall percentile for a candidate with no occupation and no location group', async () => {
     await open({ total: 546, location: 'onshore', overall: { n: 23, percentile: 54, median: 536 }, occupation: null })
-    await screen.findByText('Your percentile')
+    await screen.findByText('Your ranking')
     expect(screen.getByText('All candidates')).toBeTruthy()
     expect(screen.queryByText('Onshore candidates')).toBeNull()
   })
@@ -624,43 +643,135 @@ describe('your percentile in three contexts', () => {
   it('does not show the percentiles while the overall pool is below 10', async () => {
     await open({ ...waiting(6), locationGroup: { n: 4, percentile: 50, median: 500 } })
     await screen.findByText('Your score is saved')
-    expect(screen.queryByText('Your percentile')).toBeNull()
+    expect(screen.queryByText('Your ranking')).toBeNull()
     expect(screen.getByText(/So far 6 have/)).toBeTruthy()
   })
 
   it('names the three contexts in Chinese', async () => {
     await open(threeContexts, 'zh')
-    await screen.findByText('您的百分位')
+    await screen.findByText('您在各群体中的排名')
     for (const text of [
-      '全部候选人', '23 位候选人', '第 54 百分位',
-      '软件工程师（Software engineer）', '9 位候选人', '第 93 百分位',
-      '境内候选人', '15 位候选人', '第 60 百分位',
+      '全部候选人', '23 位候选人', '前46%',
+      '软件工程师（Software engineer）', '9 位候选人', '前7%',
+      '境内候选人', '15 位候选人', '前40%',
     ]) {
       expect(screen.getByText(text), text).toBeTruthy()
     }
   })
 })
 
-describe('the per-device limit', () => {
-  it('tells the candidate they have used their submissions, and stops them trying again', async () => {
-    vi.mocked(api.submitScore).mockResolvedValue({ status: 'device_limit', limit: 5 })
+describe('one submission per device', () => {
+  const FIRST = { id: ID2, total: 700 }
+  const okReplacing = () =>
+    vi.mocked(api.submitScore).mockResolvedValue({
+      status: 'ok',
+      replaced: [ID2],
+      submission: submission(waiting(3)),
+    })
+
+  it('asks before replacing, and says what withdrawing means', async () => {
+    vi.mocked(api.submitScore).mockResolvedValue({ status: 'already_submitted', existing: FIRST })
     reachSubmitCard()
     fireEvent.click(screen.getByText(CTA))
-    await screen.findByText(
-      'You have reached the limit of 5 submissions on this device. Your earlier results are still under Your submissions.',
-    )
-    expect((screen.getByText(CTA) as HTMLButtonElement).disabled).toBe(true)
-    // It is a hard limit, so pressing the button again does nothing.
-    fireEvent.click(screen.getByText(CTA))
-    expect(api.submitScore).toHaveBeenCalledTimes(1)
-    // Nothing was saved and the page did not move to a result.
+    await screen.findByText('You have already submitted from this device')
+    expect(
+      screen.getByText(
+        'Each device can have one submission, which keeps the comparison honest. Submitting again withdraws your current submission (700 points) and deletes it from the database for good. This score takes its place.',
+      ),
+    ).toBeTruthy()
+    expect(screen.getByText('Withdraw my current submission and submit this one')).toBeTruthy()
+    expect(screen.getByText('View my current result')).toBeTruthy()
+    expect(screen.getByText('Cancel')).toBeTruthy()
+    // The normal button is out of the way, and nothing was saved or changed.
+    expect(screen.queryByText(CTA)).toBeNull()
     expect(window.location.pathname).toBe('/')
     expect(loadHistory()).toEqual([])
   })
 
+  it('first tries to submit without replacing anything', async () => {
+    vi.mocked(api.submitScore).mockResolvedValue({ status: 'already_submitted', existing: FIRST })
+    reachSubmitCard()
+    fireEvent.click(screen.getByText(CTA))
+    await screen.findByText('You have already submitted from this device')
+    expect(api.submitScore).toHaveBeenCalledTimes(1)
+    expect(api.submitScore).toHaveBeenNthCalledWith(1, expect.anything(), null, { turnstileToken: null, replace: false })
+  })
+
+  it('withdraws the current submission and saves the new one only after the candidate agrees', async () => {
+    addToHistory(entry(ID2, { total: 700 }))
+    vi.mocked(api.submitScore)
+      .mockResolvedValueOnce({ status: 'already_submitted', existing: FIRST })
+      .mockResolvedValueOnce({ status: 'ok', replaced: [ID2], submission: submission(waiting(3)) })
+    reachSubmitCard()
+    fireEvent.click(screen.getByText(CTA))
+    await screen.findByText('You have already submitted from this device')
+    fireEvent.click(screen.getByText('Withdraw my current submission and submit this one'))
+    await screen.findByText('Your score is saved')
+
+    expect(api.submitScore).toHaveBeenNthCalledWith(2, expect.anything(), null, { turnstileToken: null, replace: true })
+    expect(window.location.pathname).toBe(`/r/${ID}`)
+    // The withdrawn result is deleted on the server, so it leaves the list. Only the new one is left.
+    expect(loadHistory().map((e) => e.id)).toEqual([ID])
+  })
+
+  it('keeps everything as it was when the candidate cancels', async () => {
+    addToHistory(entry(ID2, { total: 700 }))
+    vi.mocked(api.submitScore).mockResolvedValue({ status: 'already_submitted', existing: FIRST })
+    reachSubmitCard()
+    fireEvent.click(screen.getByText(CTA))
+    await screen.findByText('You have already submitted from this device')
+    fireEvent.click(screen.getByText('Cancel'))
+    expect(screen.queryByText('You have already submitted from this device')).toBeNull()
+    expect(screen.getByText(CTA)).toBeTruthy()
+    expect(api.submitScore).toHaveBeenCalledTimes(1)
+    expect(loadHistory().map((e) => e.id)).toEqual([ID2])
+  })
+
+  it('lets the candidate look at their current result instead', async () => {
+    vi.mocked(api.submitScore).mockResolvedValue({ status: 'already_submitted', existing: FIRST })
+    vi.mocked(api.loadSubmission).mockResolvedValue({ input: INPUT, submission: { ...submission(ranked), id: ID2 } })
+    reachSubmitCard()
+    fireEvent.click(screen.getByText(CTA))
+    await screen.findByText('You have already submitted from this device')
+    fireEvent.click(screen.getByText('View my current result'))
+    await screen.findByText('Where you rank')
+    expect(api.loadSubmission).toHaveBeenCalledWith(ID2)
+    expect(window.location.pathname).toBe(`/r/${ID2}`)
+    expect(api.submitScore).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows progress while withdrawing and cannot be pressed twice', async () => {
+    let finish!: (value: Awaited<ReturnType<typeof api.submitScore>>) => void
+    vi.mocked(api.submitScore)
+      .mockResolvedValueOnce({ status: 'already_submitted', existing: FIRST })
+      .mockReturnValueOnce(new Promise((resolve) => (finish = resolve)))
+    reachSubmitCard()
+    fireEvent.click(screen.getByText(CTA))
+    await screen.findByText('You have already submitted from this device')
+    fireEvent.click(screen.getByText('Withdraw my current submission and submit this one'))
+    const busy = (await screen.findByText('Withdrawing...')) as HTMLButtonElement
+    expect(busy.disabled).toBe(true)
+    fireEvent.click(busy)
+    expect(api.submitScore).toHaveBeenCalledTimes(2)
+    finish({ status: 'ok', replaced: [ID2], submission: submission(waiting(3)) })
+    await screen.findByText('Your score is saved')
+  })
+
+  it('keeps the choice open and explains when the replacement fails', async () => {
+    vi.mocked(api.submitScore)
+      .mockResolvedValueOnce({ status: 'already_submitted', existing: FIRST })
+      .mockResolvedValueOnce({ status: 'error' })
+    reachSubmitCard()
+    fireEvent.click(screen.getByText(CTA))
+    await screen.findByText('You have already submitted from this device')
+    fireEvent.click(screen.getByText('Withdraw my current submission and submit this one'))
+    await screen.findByText('Could not submit right now. Your score above is unaffected. Try again shortly.')
+    expect(screen.getByText('Withdraw my current submission and submit this one')).toBeTruthy()
+  })
+
   it('says the same in Chinese', async () => {
     localStorage.setItem('vpt-lang', 'zh')
-    vi.mocked(api.submitScore).mockResolvedValue({ status: 'device_limit', limit: 5 })
+    vi.mocked(api.submitScore).mockResolvedValue({ status: 'already_submitted', existing: FIRST })
     renderApp()
     type('您的年龄是？', '30')
     pick('熟练（Proficient）')
@@ -670,14 +781,187 @@ describe('the per-device limit', () => {
     pick('您单身、配偶是澳大利亚人，或不满足上述要求')
     type('您目前在维多利亚州技术岗位的年收入是多少？', '0')
     fireEvent.click(screen.getByText(CTA_ZH))
-    await screen.findByText('此设备最多可提交 5 次，您已达到上限。之前的结果仍可在“您的提交记录”中查看。')
-    expect((screen.getByText(CTA_ZH) as HTMLButtonElement).disabled).toBe(true)
+    await screen.findByText('您已在此设备上提交过')
+    expect(
+      screen.getByText(
+        '为保证对比的真实性，每台设备只能有一份提交。再次提交将撤回您当前的提交（700 分），并将其从数据库中永久删除，本次分数将取而代之。',
+      ),
+    ).toBeTruthy()
+    expect(screen.getByText('撤回我当前的提交并提交此分数')).toBeTruthy()
+    expect(screen.getByText('查看我当前的结果')).toBeTruthy()
+    expect(screen.getByText('取消')).toBeTruthy()
   })
 
-  it('still lets a candidate who is under the limit submit as normal', async () => {
-    vi.mocked(api.submitScore).mockResolvedValue({ status: 'ok', submission: submission(waiting(3)) })
+  it('still lets a candidate with no earlier submission submit as normal', async () => {
+    vi.mocked(api.submitScore).mockResolvedValue({ status: 'ok', replaced: [], submission: submission(waiting(3)) })
     submitFromScratch()
     await screen.findByText('Your score is saved')
     expect(window.location.pathname).toBe(`/r/${ID}`)
+    expect(okReplacing).toBeDefined()
+  })
+})
+
+describe('the bot check', () => {
+  const SITE_KEY = '1x00000000000000000000AA' // Cloudflare's published test key
+  interface Rendered { el: HTMLElement; options: Record<string, unknown> }
+  let rendered: Rendered[]
+  let reset: ReturnType<typeof vi.fn>
+  let remove: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    rendered = []
+    reset = vi.fn()
+    remove = vi.fn()
+    vi.stubEnv('VITE_TURNSTILE_SITE_KEY', SITE_KEY)
+    // Declaring the API up front means the script is never fetched.
+    window.turnstile = {
+      render: (el, options) => {
+        rendered.push({ el, options })
+        return `widget-${rendered.length}`
+      },
+      reset,
+      remove,
+    }
+  })
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    delete window.turnstile
+  })
+
+  // The widget is created once the script check resolves, a moment after the card appears.
+  const reachWidget = async () => {
+    reachSubmitCard()
+    await waitFor(() => expect(rendered.length).toBeGreaterThan(0))
+  }
+  const widget = () => rendered[rendered.length - 1]
+  const pass = (token = 'good-token') => act(() => (widget().options.callback as (t: string) => void)(token))
+  const cta = () => screen.getByText(CTA) as HTMLButtonElement
+
+  it('waits for the check before the button works, then sends the token with the score', async () => {
+    vi.mocked(api.submitScore).mockResolvedValue({ status: 'ok', replaced: [], submission: submission(waiting(3)) })
+    await reachWidget()
+    expect(cta().disabled).toBe(true)
+    expect(screen.getByText('Verifying...')).toBeTruthy()
+
+    pass('good-token')
+    expect(cta().disabled).toBe(false)
+    expect(screen.queryByText('Verifying...')).toBeNull()
+
+    fireEvent.click(cta())
+    await screen.findByText('Your score is saved')
+    expect(api.submitScore).toHaveBeenCalledWith(expect.anything(), null, { turnstileToken: 'good-token', replace: false })
+  })
+
+  it('sets up an invisible widget with the right key and language', async () => {
+    await reachWidget()
+    expect(rendered).toHaveLength(1)
+    expect(rendered[0].options).toMatchObject({ sitekey: SITE_KEY, appearance: 'interaction-only', language: 'en' })
+  })
+
+  it('uses Chinese for the widget in Chinese, and starts again when the language changes', async () => {
+    localStorage.setItem('vpt-lang', 'zh')
+    renderApp()
+    type('您的年龄是？', '30')
+    pick('熟练（Proficient）')
+    pick('3 至 5 年')
+    pick("学士或荣誉学士（Bachelor's or Honours）")
+    pick('技能等级 1')
+    pick('您单身、配偶是澳大利亚人，或不满足上述要求')
+    type('您目前在维多利亚州技术岗位的年收入是多少？', '0')
+    await waitFor(() => expect(rendered.length).toBeGreaterThan(0))
+    expect(widget().options.language).toBe('zh-cn')
+    pass('t')
+    expect((screen.getByText(CTA_ZH) as HTMLButtonElement).disabled).toBe(false)
+
+    fireEvent.click(screen.getByText('English'))
+    await waitFor(() => expect(rendered.at(-1)!.options.language).toBe('en'))
+    expect(remove).toHaveBeenCalled()
+    // A new widget means a new check.
+    expect((screen.getByText(CTA) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('disables the button again when the token expires', async () => {
+    await reachWidget()
+    pass()
+    expect(cta().disabled).toBe(false)
+    act(() => (widget().options['expired-callback'] as () => void)())
+    expect(cta().disabled).toBe(true)
+  })
+
+  it('discards the token and asks for a new one when the server rejects it', async () => {
+    vi.mocked(api.submitScore).mockResolvedValue({ status: 'bot_check_failed' })
+    await reachWidget()
+    pass()
+    fireEvent.click(cta())
+    await screen.findByText('We could not confirm you are a person. Please try again.')
+    expect(reset).toHaveBeenCalledWith('widget-1')
+    expect(cta().disabled).toBe(true)
+    pass('fresh-token')
+    expect(cta().disabled).toBe(false)
+  })
+
+  it('also asks for a new token after a failed save, since the old one was used up', async () => {
+    vi.mocked(api.submitScore).mockResolvedValue({ status: 'error' })
+    await reachWidget()
+    pass()
+    fireEvent.click(cta())
+    await screen.findByText('Could not submit right now. Your score above is unaffected. Try again shortly.')
+    expect(reset).toHaveBeenCalledTimes(1)
+  })
+
+  it('reuses the same token for the replacement, because the earlier answer did not use it up', async () => {
+    vi.mocked(api.submitScore)
+      .mockResolvedValueOnce({ status: 'already_submitted', existing: { id: ID2, total: 700 } })
+      .mockResolvedValueOnce({ status: 'ok', replaced: [ID2], submission: submission(waiting(3)) })
+    await reachWidget()
+    pass('only-token')
+    fireEvent.click(cta())
+    await screen.findByText('You have already submitted from this device')
+    expect(reset).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByText('Withdraw my current submission and submit this one'))
+    await screen.findByText('Your score is saved')
+    expect(api.submitScore).toHaveBeenNthCalledWith(2, expect.anything(), null, { turnstileToken: 'only-token', replace: true })
+  })
+
+  it('does not reset the check for a rejected occupation, which never reached it', async () => {
+    vi.mocked(api.submitScore).mockResolvedValue({ status: 'invalid_occupation' })
+    await reachWidget()
+    pass()
+    fireEvent.click(cta())
+    await screen.findByText('Use letters, numbers and basic punctuation only for the occupation.')
+    expect(reset).not.toHaveBeenCalled()
+    expect(cta().disabled).toBe(false)
+  })
+
+  it('explains and stays blocked when the check cannot run, such as when a blocker stops it loading', async () => {
+    await reachWidget()
+    act(() => (widget().options['error-callback'] as () => void)())
+    expect(screen.getByText('The security check could not load. Check your connection or turn off content blockers, then reload the page.')).toBeTruthy()
+    expect(cta().disabled).toBe(true)
+  })
+
+  it('recovers if the check starts working again', async () => {
+    await reachWidget()
+    act(() => (widget().options['error-callback'] as () => void)())
+    pass('late-token')
+    expect(screen.queryByText(/security check could not load/)).toBeNull()
+    expect(cta().disabled).toBe(false)
+  })
+
+  it('takes the widget down when the card goes away', async () => {
+    await reachWidget()
+    cleanup()
+    expect(remove).toHaveBeenCalledWith('widget-1')
+  })
+
+  it('shows nothing of this when no site key is set', async () => {
+    vi.unstubAllEnvs()
+    rendered.length = 0
+    reachSubmitCard()
+    // Give a widget every chance to appear. None should.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(rendered).toHaveLength(0)
+    expect(screen.queryByText('Verifying...')).toBeNull()
+    expect(cta().disabled).toBe(false)
   })
 })

@@ -18,19 +18,24 @@ import {
   type VptResult,
 } from '../supabase/functions/_shared/scoring'
 import { submitScore, type OccupationChoice, type Submission } from './api'
+import { turnstileSiteKey } from './config'
 import { money } from './format'
 import { LockIcon } from './icons'
 import { useI18n, type Key } from './i18n'
 import { OccupationPicker } from './OccupationPicker'
 import { occupationDisplayName } from './occupationSearch'
 import { PartnerRequirements } from './PartnerRequirements'
+import { SECTION_SCORES, medianScore, topPercent } from './sectionScores'
+import { Turnstile } from './Turnstile'
 
 export function Results(props: {
   draft: VptDraft
   submission: Submission | null
   onRefine: (patch: Partial<VptDraft>) => void
   onRefresh: () => Promise<void>
-  onSubmitted: (s: Submission) => void
+  // replaced lists any earlier submission from this device that the new one withdrew.
+  onSubmitted: (s: Submission, replaced: string[]) => void
+  onOpen: (id: string) => void
   onRestart: () => void
 }) {
   const { t } = useI18n()
@@ -96,7 +101,7 @@ export function Results(props: {
           onRefresh={props.onRefresh}
         />
       ) : resolved ? (
-        <SubmitCard input={resolved} onSubmitted={props.onSubmitted} />
+        <SubmitCard input={resolved} onSubmitted={props.onSubmitted} onOpen={props.onOpen} />
       ) : (
         <RefineCard draft={draft} onRefine={props.onRefine} />
       )}
@@ -166,29 +171,40 @@ function RefineButton(props: { onClick: () => void; children: React.ReactNode })
 
 type Notice = { key: Key; params?: Record<string, string | number> }
 
-function SubmitCard(props: { input: VptInput; onSubmitted: (s: Submission) => void }) {
-  const { t } = useI18n()
+function SubmitCard(props: {
+  input: VptInput
+  onSubmitted: (s: Submission, replaced: string[]) => void
+  onOpen: (id: string) => void
+}) {
+  const { t, lang } = useI18n()
+  const siteKey = turnstileSiteKey()
   const [occupation, setOccupation] = useState<OccupationChoice | null>(null)
   // Stored as a key so the message follows the language toggle.
   const [notice, setNotice] = useState<Notice | null>(null)
   const [busy, setBusy] = useState(false)
-  // Once the device has used all its submissions, trying again can only fail.
-  const [blocked, setBlocked] = useState(false)
+  // Set when this device already has a submission. The candidate must choose to withdraw it before submitting again.
+  const [existing, setExisting] = useState<{ id: string; total: number } | null>(null)
+  // The bot check. A token is single use, so it is replaced after any attempt that consumed it.
+  const [token, setToken] = useState<string | null>(null)
+  const [resetKey, setResetKey] = useState(0)
+  const [checkUnavailable, setCheckUnavailable] = useState(false)
+  const checking = siteKey !== null && token === null && !checkUnavailable
+  const cannotSend = busy || checking || checkUnavailable
 
-  const submit = async () => {
+  const send = async (replace: boolean) => {
     setBusy(true)
     setNotice(null)
-    const outcome = await submitScore(props.input, occupation)
+    const outcome = await submitScore(props.input, occupation, { turnstileToken: token, replace })
     setBusy(false)
-    if (outcome.status === 'ok') return props.onSubmitted(outcome.submission)
-    if (outcome.status === 'device_limit') {
-      setBlocked(true)
-      setNotice({ key: 'submit.deviceLimit', params: { limit: outcome.limit } })
-    } else if (outcome.status === 'invalid_occupation') {
-      setNotice({ key: 'submit.invalidOcc' })
-    } else {
-      setNotice({ key: 'submit.error' })
+    if (outcome.status === 'ok') return props.onSubmitted(outcome.submission, outcome.replaced)
+    // The server answers this before it checks the token, so the token is still good for the replacement.
+    if (outcome.status === 'already_submitted') return setExisting(outcome.existing)
+    if (outcome.status === 'bot_check_failed' || outcome.status === 'error') {
+      if (siteKey) setResetKey((k) => k + 1)
     }
+    if (outcome.status === 'bot_check_failed') setNotice({ key: 'submit.botFailed' })
+    else if (outcome.status === 'invalid_occupation') setNotice({ key: 'submit.invalidOcc' })
+    else setNotice({ key: 'submit.error' })
   }
 
   return (
@@ -199,21 +215,65 @@ function SubmitCard(props: { input: VptInput; onSubmitted: (s: Submission) => vo
       <p className="mt-0.5 text-xs text-stone-500">{t('submit.occHint')}</p>
       <OccupationPicker value={occupation} onChange={setOccupation} />
 
+      {checkUnavailable && (
+        <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">{t('submit.botUnavailable')}</p>
+      )}
       {notice && (
         <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">{t(notice.key, notice.params)}</p>
       )}
 
-      <button
-        onClick={submit}
-        disabled={busy || blocked}
-        className="mt-5 min-h-14 w-full rounded-xl bg-accent px-5 py-3 text-base font-semibold text-white transition enabled:hover:opacity-90 enabled:active:opacity-80 disabled:opacity-60"
-      >
-        {busy ? t('submit.busy') : t('submit.cta')}
-      </button>
-      <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-stone-500">
-        <LockIcon className="size-3.5 text-emerald-700" />
-        <span>{t('submit.anon')}</span>
-      </p>
+      {existing ? (
+        <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+          <p className="font-semibold">{t('withdraw.title')}</p>
+          <p className="mt-1 leading-relaxed">{t('withdraw.body', { total: existing.total })}</p>
+          <div className="mt-4 grid gap-2">
+            <button
+              onClick={() => send(true)}
+              disabled={cannotSend}
+              className="min-h-12 rounded-xl bg-red-700 px-4 py-2 font-medium text-white transition enabled:active:opacity-80 disabled:opacity-60"
+            >
+              {busy ? t('withdraw.busy') : t('withdraw.confirm')}
+            </button>
+            <button
+              onClick={() => props.onOpen(existing.id)}
+              className="min-h-12 rounded-xl border border-amber-300 bg-white px-4 py-2 font-medium active:bg-amber-100"
+            >
+              {t('withdraw.view')}
+            </button>
+            <button onClick={() => setExisting(null)} className="min-h-11 px-4 text-amber-900/80 active:text-amber-950">
+              {t('withdraw.cancel')}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <button
+            onClick={() => send(false)}
+            disabled={cannotSend}
+            className="mt-5 min-h-14 w-full rounded-xl bg-accent px-5 py-3 text-base font-semibold text-white transition enabled:hover:opacity-90 enabled:active:opacity-80 disabled:opacity-60"
+          >
+            {busy ? t('submit.busy') : t('submit.cta')}
+          </button>
+          {checking && <p className="mt-2 text-center text-xs text-stone-400">{t('submit.verifying')}</p>}
+          <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-stone-500">
+            <LockIcon className="size-3.5 text-emerald-700" />
+            <span>{t('submit.anon')}</span>
+          </p>
+        </>
+      )}
+
+      {siteKey && (
+        <Turnstile
+          siteKey={siteKey}
+          lang={lang}
+          resetKey={resetKey}
+          onToken={(value) => {
+            setToken(value)
+            if (value) setCheckUnavailable(false)
+          }}
+          onUnavailable={() => setCheckUnavailable(true)}
+        />
+      )}
     </div>
   )
 }
@@ -315,7 +375,7 @@ function Comparison({ insights }: { insights: Insights }) {
             </span>
             <span className="shrink-0 text-right">
               {row.percentile !== undefined ? (
-                <span className="text-lg font-semibold tracking-tight">{t('ins.pct', { p: row.percentile })}</span>
+                <span className="text-lg font-semibold tracking-tight">{t('ins.pct', { p: topPercent(row.percentile) })}</span>
               ) : (
                 <span className="text-xs text-stone-500">{t('cmp.first')}</span>
               )}
@@ -334,6 +394,7 @@ function PercentileBar({ insights }: { insights: Insights }) {
   const { overall } = insights
   if (!isRanked(overall)) return null
   const p = overall.percentile
+  const top = topPercent(p)
   const mean = overall.mean
   const meanAt = overall.meanPercentile
 
@@ -345,7 +406,7 @@ function PercentileBar({ insights }: { insights: Insights }) {
       <div
         className="relative mt-11 mb-2 h-3 rounded-full bg-stone-200"
         role="img"
-        aria-label={t('rank.youAt', { p })}
+        aria-label={t('rank.youAt', { p: top })}
       >
         <div className="absolute inset-y-0 left-0 rounded-full bg-indigo-200" style={{ width: `${p}%` }} />
         {/* The median is the 50th percentile by definition. */}
@@ -359,7 +420,7 @@ function PercentileBar({ insights }: { insights: Insights }) {
           className="absolute -top-9 -translate-x-1/2 rounded-md bg-accent px-2 py-1 text-xs font-medium whitespace-nowrap text-white"
           style={{ left: `clamp(3rem, ${p}%, calc(100% - 3rem))` }}
         >
-          {t('rank.youAt', { p })}
+          {t('rank.youAt', { p: top })}
         </div>
       </div>
       <div className="flex justify-between text-xs text-stone-400">
@@ -404,7 +465,7 @@ function SectionCharts({ result, overall }: { result: VptResult; overall: PoolSt
         {result.categories.map((c) => {
           const dist = overall.categoryDist?.[c.key]
           const pct = overall.categoryPercentile?.[c.key]
-          const avg = overall.categoryAvg?.[c.key]
+          const median = dist ? medianScore(dist) : undefined
           return (
             <li key={c.key}>
               <div className="flex items-baseline justify-between gap-3 text-sm">
@@ -414,16 +475,16 @@ function SectionCharts({ result, overall }: { result: VptResult; overall: PoolSt
                 </span>
               </div>
               {dist ? (
-                <ScoreBars dist={dist} mine={c.points} />
+                <ScoreBars dist={dist} mine={c.points} median={median} all={SECTION_SCORES[c.key]} />
               ) : (
                 <div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-200">
                   <div className="h-full rounded-full bg-accent" style={{ width: `${(c.points / c.max) * 100}%` }} />
                 </div>
               )}
               <p className="mt-1.5 text-xs font-medium text-stone-500">
-                {pct !== undefined && t('ins.pct', { p: pct })}
-                {pct !== undefined && avg !== undefined && ' · '}
-                {avg !== undefined && t('sec.avg', { avg: Math.round(avg) })}
+                {pct !== undefined && t('ins.pct', { p: topPercent(pct) })}
+                {pct !== undefined && median !== undefined && ' · '}
+                {median !== undefined && t('sec.median', { median })}
               </p>
             </li>
           )
@@ -436,19 +497,28 @@ function SectionCharts({ result, overall }: { result: VptResult; overall: PoolSt
   )
 }
 
-function ScoreBars({ dist, mine }: { dist: { points: number; count: number }[]; mine: number }) {
+function ScoreBars({
+  dist,
+  mine,
+  median,
+  all,
+}: {
+  dist: { points: number; count: number }[]
+  mine: number
+  median: number | undefined
+  all: number[]
+}) {
   const { t } = useI18n()
   const counts = new Map(dist.map((d) => [d.points, d.count]))
-  // Keep the candidate's own score on the chart even if no one is recorded at it.
-  if (!counts.has(mine)) counts.set(mine, 0)
-  const values = [...counts.keys()].sort((a, b) => a - b)
+  // One bar for every score the section can give, plus any the server reports that are not in the list.
+  const values = [...new Set([...all, ...counts.keys(), mine])].sort((a, b) => a - b)
   const peak = Math.max(1, ...counts.values())
-  // Label every bar when there are few, otherwise only the two ends and the candidate's own score.
-  const labelAll = values.length <= 8
+  // Many bars leave no room for horizontal labels, so they are turned on their side.
+  const dense = values.length > 8
 
   return (
     <div className="mt-2">
-      <div className="flex h-16 items-end gap-1">
+      <div className={`flex h-16 items-end ${dense ? 'gap-0.5' : 'gap-1'}`}>
         {values.map((v) => {
           const count = counts.get(v) ?? 0
           return (
@@ -462,13 +532,25 @@ function ScoreBars({ dist, mine }: { dist: { points: number; count: number }[]; 
           )
         })}
       </div>
-      <div className="mt-1 flex gap-1 text-[10px] text-stone-400 tabular-nums">
-        {values.map((v, i) => (
+      {/* A dark mark under the bar at the median score. */}
+      <div className={`mt-0.5 flex ${dense ? 'gap-0.5' : 'gap-1'}`}>
+        {values.map((v) => (
           <span
             key={v}
-            className={`flex-1 text-center ${v === mine ? 'font-semibold text-accent' : ''}`}
+            data-median={v === median ? 'true' : undefined}
+            className={`h-1 flex-1 rounded-b ${v === median ? 'bg-stone-900' : ''}`}
+          />
+        ))}
+      </div>
+      <div className={`mt-1 flex text-[10px] text-stone-400 tabular-nums ${dense ? 'gap-0.5' : 'gap-1'}`}>
+        {values.map((v) => (
+          <span
+            key={v}
+            className={`flex-1 text-center ${dense ? '[writing-mode:vertical-rl] rotate-180' : ''} ${
+              v === mine ? 'font-semibold text-accent' : v === median ? 'font-semibold text-stone-900' : ''
+            }`}
           >
-            {labelAll || i === 0 || i === values.length - 1 || v === mine ? v : ''}
+            {v}
           </span>
         ))}
       </div>

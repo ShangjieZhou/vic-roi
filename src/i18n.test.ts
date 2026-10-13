@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { en, ordinal } from './i18n/en'
+import { en } from './i18n/en'
 import { zh } from './i18n/zh'
 import { translate, type Key } from './i18n'
 
@@ -46,14 +46,9 @@ describe('translations', () => {
   })
 })
 
-describe('ordinal', () => {
-  it.each([
-    [0, '0th'], [1, '1st'], [2, '2nd'], [3, '3rd'], [4, '4th'], [10, '10th'], [11, '11th'], [12, '12th'], [13, '13th'],
-    [21, '21st'], [22, '22nd'], [23, '23rd'], [47, '47th'], [50, '50th'], [78, '78th'], [100, '100th'],
-  ])('%i -> %s', (n, text) => expect(ordinal(n)).toBe(text))
-
-  it('renders section percentiles in both languages', () => {
-    expect(translate('en', 'ins.pct', { p: 22 })).toBe('22nd percentile')
-    expect(translate('zh', 'ins.pct', { p: 22 })).toBe('第 22 百分位')
+describe('top percent', () => {
+  it('renders in both languages', () => {
+    expect(translate('en', 'ins.pct', { p: 22 })).toBe('Top 22%')
+    expect(translate('zh', 'ins.pct', { p: 22 })).toBe('前22%')
   })
 })

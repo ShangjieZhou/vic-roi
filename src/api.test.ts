@@ -61,8 +61,10 @@ describe('submitScore', () => {
 
   it('maps server responses to outcomes', async () => {
     const api = await load()
-    vi.mocked(fetch).mockResolvedValueOnce(respond(403, { error: 'device_limit', limit: 5 }))
-    expect(await api.submitScore(INPUT, null)).toEqual({ status: 'device_limit', limit: 5 })
+    vi.mocked(fetch).mockResolvedValueOnce(respond(409, { error: 'already_submitted', existing: { id: 'old', total: 700 } }))
+    expect(await api.submitScore(INPUT, null)).toEqual({ status: 'already_submitted', existing: { id: 'old', total: 700 } })
+    vi.mocked(fetch).mockResolvedValueOnce(respond(403, { error: 'bot_check_failed' }))
+    expect(await api.submitScore(INPUT, null)).toEqual({ status: 'bot_check_failed' })
     vi.mocked(fetch).mockResolvedValueOnce(respond(400, { error: 'invalid_occupation' }))
     expect(await api.submitScore(INPUT, { kind: 'listed', code: '000000' })).toEqual({ status: 'invalid_occupation' })
     vi.mocked(fetch).mockResolvedValueOnce(respond(500, { error: 'save_failed' }))
@@ -71,11 +73,32 @@ describe('submitScore', () => {
     expect(await api.submitScore(INPUT, null)).toEqual({ status: 'error' })
   })
 
-  it('treats the old per-IP 429 and any other 403 as a plain error, not as the device limit', async () => {
+  it('sends the Turnstile token and the replace flag only when asked', async () => {
+    const api = await load()
+    vi.mocked(fetch).mockResolvedValue(respond(201, { id: 'abc', insights: INSIGHTS, replaced: ['old'] }))
+    const outcome = await api.submitScore(INPUT, null, { turnstileToken: 'tok', replace: true })
+    expect(sentBody()).toEqual({ input: INPUT, deviceId: DEVICE, turnstileToken: 'tok', replace: true })
+    expect(outcome).toMatchObject({ status: 'ok', replaced: ['old'] })
+    vi.mocked(fetch).mockClear()
+    await api.submitScore(INPUT, null, { turnstileToken: null, replace: false })
+    expect(sentBody()).toEqual({ input: INPUT, deviceId: DEVICE })
+  })
+
+  it('reports no replaced submissions when the server sends none', async () => {
+    const api = await load()
+    vi.mocked(fetch).mockResolvedValue(respond(201, { id: 'abc', insights: INSIGHTS }))
+    expect(await api.submitScore(INPUT, null)).toMatchObject({ status: 'ok', replaced: [] })
+  })
+
+  it('treats the old per-IP 429, an old device-limit 403 and any other 403 as a plain error', async () => {
     const api = await load()
     vi.mocked(fetch).mockResolvedValueOnce(respond(429, { error: 'rate_limited', retryAfter: 90 }))
     expect(await api.submitScore(INPUT, null)).toEqual({ status: 'error' })
+    vi.mocked(fetch).mockResolvedValueOnce(respond(403, { error: 'device_limit', limit: 5 }))
+    expect(await api.submitScore(INPUT, null)).toEqual({ status: 'error' })
     vi.mocked(fetch).mockResolvedValueOnce(respond(403, { error: 'something_else' }))
+    expect(await api.submitScore(INPUT, null)).toEqual({ status: 'error' })
+    vi.mocked(fetch).mockResolvedValueOnce(respond(409, { error: 'something_else' }))
     expect(await api.submitScore(INPUT, null)).toEqual({ status: 'error' })
   })
 

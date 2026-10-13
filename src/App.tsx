@@ -119,9 +119,11 @@ export function App() {
     else setStep(step + 1)
   }
 
-  const submitted = (s: Submission) => {
+  // replaced lists any earlier submission this one withdrew. It is gone from the server, so it leaves the list too.
+  const submitted = (s: Submission, replaced: string[]) => {
     setSubmission(s)
     go(`/r/${s.id}`)
+    for (const id of replaced) removeFromHistory(id)
     setHistory(
       addToHistory({
         id: s.id,
@@ -175,6 +177,10 @@ export function App() {
               onRefine={(patch) => setInput({ ...input, ...patch })}
               onRefresh={refreshInsights}
               onSubmitted={submitted}
+              onOpen={(id) => {
+                go(`/r/${id}`)
+                showResult(id)
+              }}
               onRestart={goHome}
             />
           </>

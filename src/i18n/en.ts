@@ -2,12 +2,6 @@ export type Params = Record<string, string | number>
 // Strings may use {name} placeholders. Functions handle plurals and other grammar.
 export type Msg = string | ((p: Params) => string)
 
-export function ordinal(n: number): string {
-  const lastTwo = n % 100
-  if (lastTwo >= 11 && lastTwo <= 13) return `${n}th`
-  return `${n}${({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th'}`
-}
-
 const plural = (n: string | number, one: string, many: string) => (Number(n) === 1 ? one : many)
 
 // English is the source of truth: the key set below defines what every language must provide.
@@ -129,9 +123,9 @@ export const en = {
   'hist.clearNote': 'This only removes the list from this device.',
   'hist.back': 'My submissions',
 
-  'ins.pct': (p) => `${ordinal(Number(p.p))} percentile`,
+  'ins.pct': 'Top {p}%',
   'ins.pctNote':
-    'Percentile is the share of candidates who scored lower than you, plus half of those who tied. When most candidates share the same points in a section, that score sits near the 50th percentile.',
+    'Top xx% is the share of candidates who scored higher than you, plus half of those who tied. When most candidates share the same points in a section, that score sits near the top 50%.',
   'ins.keepLink': 'Keep this link to return to your result.',
   'ins.share': 'Share',
   'ins.copyLink': 'Copy link',
@@ -160,15 +154,24 @@ export const en = {
   'rank.score': 'Your score',
   'rank.median': 'Median',
   'rank.average': 'Average',
-  'rank.youAt': (p) => `You: ${ordinal(Number(p.p))} percentile`,
+  'rank.youAt': 'You: top {p}%',
   'sec.title': 'Your score in each section',
-  'sec.legend': 'Bars show how many candidates scored each value. Your score is highlighted.',
-  'sec.avg': 'Average {avg}',
+  'sec.legend': 'Bars show how many candidates scored each value. Your score is highlighted, and a dark mark shows the median.',
+  'sec.median': 'Median {median}',
   'sec.bar': (p) => `${p.count} ${plural(p.count, 'candidate', 'candidates')} at ${p.points} points`,
-  'cmp.title': 'Your percentile',
+  'cmp.title': 'Your ranking',
   'q.earn.offshore.hint': 'You are outside Australia, so you score 0 income points',
   'res.offshoreZero': 'Offshore: counts as 0 income points',
-  'submit.deviceLimit': 'You have reached the limit of {limit} submissions on this device. Your earlier results are still under Your submissions.',
+  'withdraw.title': 'You have already submitted from this device',
+  'withdraw.body': (p) =>
+    `Each device can have one submission, which keeps the comparison honest. Submitting again withdraws your current submission (${p.total} points) and deletes it from the database for good. This score takes its place.`,
+  'withdraw.confirm': 'Withdraw my current submission and submit this one',
+  'withdraw.busy': 'Withdrawing...',
+  'withdraw.view': 'View my current result',
+  'withdraw.cancel': 'Cancel',
+  'submit.botFailed': 'We could not confirm you are a person. Please try again.',
+  'submit.botUnavailable': 'The security check could not load. Check your connection or turn off content blockers, then reload the page.',
+  'submit.verifying': 'Verifying...',
 } satisfies Record<string, Msg>
 
 export type Key = keyof typeof en
