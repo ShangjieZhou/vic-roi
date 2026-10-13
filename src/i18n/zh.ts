@@ -124,7 +124,7 @@ export const zh: Record<Key, Msg> = {
   'support.feedbackNote': '有其他反馈或发现问题，也欢迎告诉我 🧡',
   'support.minimize': '收起',
   'support.expand': '展开',
-  'support.coffee': '给Ta打赏',
+  'support.coffee': '给Ta打赏 / 反馈',
   'support.feedback': '给我反馈',
   'support.note': '打赏通过 Buy Me a Coffee 完成，该平台有自己的隐私政策。',
   'cmp.similar': '与{name}相近（ANZSCO {prefix}）',

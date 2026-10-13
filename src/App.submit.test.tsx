@@ -934,7 +934,7 @@ describe('support card', () => {
   it('offers a tip at the bottom of the analysis, linking to the Buy Me a Coffee page', async () => {
     vi.stubEnv('VITE_FEEDBACK_URL', '')
     await open(full)
-    const coffee = screen.getByText('Buy me a coffee').closest('a')!
+    const coffee = screen.getByText('Buy me a coffee / feedback').closest('a')!
     expect(coffee.getAttribute('href')).toBe('https://buymeacoffee.com/shangjie')
     expect(coffee.getAttribute('target')).toBe('_blank')
     expect(coffee.getAttribute('rel')).toContain('noopener')
@@ -983,7 +983,7 @@ describe('support card', () => {
 
     it('starts open, with a way to minimize', async () => {
       await open(withCharts)
-      expect(screen.getByText('Buy me a coffee')).toBeTruthy()
+      expect(screen.getByText('Buy me a coffee / feedback')).toBeTruthy()
       expect(screen.getByRole('button', { name: 'Minimize' })).toBeTruthy()
     })
 
@@ -992,7 +992,7 @@ describe('support card', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Minimize' }))
       expect(events.trackSupport).toHaveBeenCalledWith('coffee_minimized')
       expect(events.trackSupport).toHaveBeenCalledTimes(1)
-      expect(screen.queryByText('Buy me a coffee')).toBeNull()
+      expect(screen.queryByText('Buy me a coffee / feedback')).toBeNull()
       expect(screen.getByText('Found it helpful?')).toBeTruthy()
       expect(screen.getByRole('button', { name: /Expand/ }).getAttribute('aria-expanded')).toBe('false')
     })
@@ -1001,7 +1001,7 @@ describe('support card', () => {
       await open(withCharts)
       fireEvent.click(screen.getByRole('button', { name: 'Minimize' }))
       fireEvent.click(screen.getByRole('button', { name: /Expand/ }))
-      expect(screen.getByText('Buy me a coffee')).toBeTruthy()
+      expect(screen.getByText('Buy me a coffee / feedback')).toBeTruthy()
       expect(events.trackSupport).toHaveBeenCalledTimes(1)
     })
 
@@ -1011,13 +1011,13 @@ describe('support card', () => {
       cleanup()
       window.history.replaceState(null, '', '/')
       await open(withCharts)
-      expect(screen.queryByText('Buy me a coffee')).toBeNull()
+      expect(screen.queryByText('Buy me a coffee / feedback')).toBeNull()
       expect(screen.getByRole('button', { name: /Expand/ })).toBeTruthy()
     })
 
     it('counts a click on the coffee button', async () => {
       await open(withCharts)
-      fireEvent.click(screen.getByText('Buy me a coffee'))
+      fireEvent.click(screen.getByText('Buy me a coffee / feedback'))
       expect(events.trackSupport).toHaveBeenCalledWith('coffee_clicked')
     })
 
@@ -1074,12 +1074,12 @@ describe('support card', () => {
     openHistory()
     fireEvent.click(screen.getByText('546 points'))
     await screen.findByText('Your score is saved')
-    expect(screen.queryByText('Buy me a coffee')).toBeNull()
+    expect(screen.queryByText('Buy me a coffee / feedback')).toBeNull()
   })
 
   it('is shown in Chinese', async () => {
     await open(withCharts, 'zh')
-    expect(screen.getByText('给Ta打赏')).toBeTruthy()
+    expect(screen.getByText('给Ta打赏 / 反馈')).toBeTruthy()
   })
 })
 

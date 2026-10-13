@@ -130,7 +130,7 @@ export const en = {
   'support.feedbackNote': 'Feedback and bug reports help too 🧡',
   'support.minimize': 'Minimize',
   'support.expand': 'Expand',
-  'support.coffee': 'Buy me a coffee',
+  'support.coffee': 'Buy me a coffee / feedback',
   'support.feedback': 'Send feedback',
   'support.note': 'Tips go through Buy Me a Coffee, which has its own privacy policy.',
   'cmp.similar': 'Similar to {name} (ANZSCO {prefix})',
