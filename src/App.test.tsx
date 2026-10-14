@@ -256,7 +256,7 @@ describe('income step', () => {
     expect(field().closest('form')!.noValidate).toBe(true)
   })
 
-  it.each([0, 1, 999, 1000, 55555, 100000, 250000, 999999, 1000000])('accepts $%i', (amount) => {
+  it.each([0, 1, 999, 1000, 55555, 100000, 250000, 299999, 300000])('accepts $%i', (amount) => {
     toIncomeStep()
     fireEvent.change(field(), { target: { value: String(amount) } })
     expect(button().disabled).toBe(false)
@@ -274,10 +274,10 @@ describe('income step', () => {
     expect(screen.getByText('$250,000 a year')).toBeTruthy()
   })
 
-  it('rejects an income above one million and says why', () => {
+  it('rejects an income above $300,000 and says why', () => {
     toIncomeStep()
-    fireEvent.change(field(), { target: { value: '1000001' } })
-    expect(screen.getByRole('alert').textContent).toBe('Enter a number from $0 to $1,000,000.')
+    fireEvent.change(field(), { target: { value: '300001' } })
+    expect(screen.getByRole('alert').textContent).toBe('Enter a number from $0 to $300,000.')
     expect(button().disabled).toBe(true)
     fireEvent.submit(field().closest('form')!)
     expect(screen.queryByText('of 950')).toBeNull()
@@ -292,7 +292,7 @@ describe('income step', () => {
   it('keeps only digits and stops one digit past the maximum', () => {
     toIncomeStep()
     fireEvent.change(field(), { target: { value: '$12,34a56789012' } })
-    expect(field().value.replace(/,/g, '').length).toBe(8)
+    expect(field().value.replace(/,/g, '').length).toBe(7)
   })
 })
 

@@ -18,10 +18,11 @@ import {
   type VptResult,
 } from '../supabase/functions/_shared/scoring'
 import { submitScore, type OccupationChoice, type Submission } from './api'
-import { COFFEE_URL, feedbackUrl, turnstileSiteKey } from './config'
+import { COFFEE_URL, turnstileSiteKey } from './config'
 import { money } from './format'
 import { ChevronIcon, CoffeeIcon, LockIcon } from './icons'
 import { trackSupport } from './events'
+import { FeedbackModal } from './FeedbackModal'
 import { useI18n, type Key } from './i18n'
 import { Modal } from './Modal'
 import { OccupationPicker } from './OccupationPicker'
@@ -223,6 +224,7 @@ function SubmitCard(props: {
     }
     if (outcome.status === 'bot_check_failed') setNotice({ key: 'submit.botFailed' })
     else if (outcome.status === 'invalid_occupation') setNotice({ key: 'submit.invalidOcc' })
+    else if (outcome.status === 'implausible_input') setNotice({ key: 'submit.implausible' })
     else setNotice({ key: 'submit.error' })
   }
 
@@ -810,7 +812,7 @@ function useSeen(ref: RefObject<Element | null>, onSeen: () => void) {
 // It can be minimized, and stays minimized on later visits. Views, minimizes and clicks are counted anonymously.
 function SupportCard() {
   const { t } = useI18n()
-  const feedback = feedbackUrl()
+  const [writing, setWriting] = useState(false)
   const [minimized, setMinimized] = useState(loadMinimized)
   const ref = useRef<HTMLElement>(null)
   useSeen(ref, () => trackSupport('coffee_seen'))
@@ -865,23 +867,21 @@ function SupportCard() {
           target="_blank"
           rel="noopener noreferrer"
           onClick={() => trackSupport('coffee_clicked')}
-          className={`${button} bg-[#f28b50] text-stone-900 shadow-sm hover:bg-[#ee7d3d]`}
+          className={`${button} min-w-40 flex-1 bg-[#f28b50] text-stone-900 shadow-sm hover:bg-[#ee7d3d]`}
         >
           <CoffeeIcon className="size-5" />
           {t('support.coffee')}
         </a>
-        {feedback && (
-          <a
-            href={feedback}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`${button} border-2 border-[#f28b50] text-[#b9531f] hover:bg-[#f28b50]/10`}
-          >
-            {t('support.feedback')}
-          </a>
-        )}
+        <button
+          type="button"
+          onClick={() => setWriting(true)}
+          className={`${button} min-w-40 flex-1 border-2 border-[#f28b50] text-[#b9531f] hover:bg-[#f28b50]/10`}
+        >
+          {t('support.feedback')}
+        </button>
       </div>
       <p className="mt-4 text-xs leading-relaxed text-stone-500">{t('support.note')}</p>
+      {writing && <FeedbackModal onClose={() => setWriting(false)} />}
     </section>
   )
 }

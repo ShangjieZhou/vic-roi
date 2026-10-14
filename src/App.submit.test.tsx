@@ -5,6 +5,7 @@ import type { Insights } from '../supabase/functions/_shared/insights'
 import { App } from './App'
 import * as api from './api'
 import * as events from './events'
+import * as feedback from './feedback'
 import { LangProvider } from './i18n'
 import { addToHistory, loadHistory, type HistoryEntry } from './saved'
 
@@ -13,6 +14,7 @@ vi.mock('./api', () => ({
   loadSubmission: vi.fn(),
 }))
 vi.mock('./events', () => ({ trackSupport: vi.fn() }))
+vi.mock('./feedback', async (original) => ({ ...(await original<typeof import('./feedback')>()), sendFeedback: vi.fn() }))
 
 const ID = '2ceb142f-cccc-4081-834a-133f83343775'
 const ID2 = '9a1b2c3d-1111-4222-8333-444455556666'
@@ -932,14 +934,13 @@ describe('support card', () => {
   }
 
   it('offers a tip at the bottom of the analysis, linking to the Buy Me a Coffee page', async () => {
-    vi.stubEnv('VITE_FEEDBACK_URL', '')
     await open(full)
-    const coffee = screen.getByText('Buy me a coffee / feedback').closest('a')!
+    const coffee = screen.getByText('Buy me a coffee').closest('a')!
     expect(coffee.getAttribute('href')).toBe('https://buymeacoffee.com/shangjie')
     expect(coffee.getAttribute('target')).toBe('_blank')
     expect(coffee.getAttribute('rel')).toContain('noopener')
     expect(screen.getByText(/any amount is appreciated/)).toBeTruthy()
-    expect(screen.queryByText('Send feedback')).toBeNull()
+    expect(screen.getByText('Send feedback').closest('button')).toBeTruthy()
     // It sits under the section charts and above the top occupations. The share link comes last, above Start over.
     const charts = screen.getByText('Your score in each section')
     const occupations = screen.getByText('Top occupations')
@@ -951,10 +952,93 @@ describe('support card', () => {
     expect(share.compareDocumentPosition(startOver) & 4).toBe(4)
   })
 
-  it('shows a feedback button once a form link is set', async () => {
-    vi.stubEnv('VITE_FEEDBACK_URL', 'https://forms.gle/example')
-    await open(withCharts)
-    expect(screen.getByText('Send feedback').closest('a')!.getAttribute('href')).toBe('https://forms.gle/example')
+  describe('feedback box', () => {
+    const write = (text: string) =>
+      fireEvent.change(screen.getByPlaceholderText('Type here...'), { target: { value: text } })
+    const dialog = () => screen.queryByRole('dialog')
+
+    beforeEach(() => vi.mocked(feedback.sendFeedback).mockReset().mockResolvedValue('ok'))
+
+    it('sits beside the coffee button and opens a box for a message', async () => {
+      await open(withCharts)
+      expect(dialog()).toBeNull()
+      fireEvent.click(screen.getByText('Send feedback'))
+      expect(within(dialog()!).getByText('Send feedback')).toBeTruthy()
+      expect(screen.getByPlaceholderText('Type here...')).toBeTruthy()
+      expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true)
+    })
+
+    it('saves the message in the current language and thanks the visitor', async () => {
+      await open(withCharts)
+      fireEvent.click(screen.getByText('Send feedback'))
+      write('  The chart is great  ')
+      expect(screen.getByText('22 / 2000')).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+      await screen.findByText('Thank you!')
+      expect(feedback.sendFeedback).toHaveBeenCalledWith('  The chart is great  ', 'en')
+      fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+      expect(dialog()).toBeNull()
+    })
+
+    it('does not send a message of only spaces', async () => {
+      await open(withCharts)
+      fireEvent.click(screen.getByText('Send feedback'))
+      write('   ')
+      expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true)
+      fireEvent.submit(screen.getByPlaceholderText('Type here...').closest('form')!)
+      expect(feedback.sendFeedback).not.toHaveBeenCalled()
+    })
+
+    it('keeps the text and says so when sending fails', async () => {
+      vi.mocked(feedback.sendFeedback).mockResolvedValue('error')
+      await open(withCharts)
+      fireEvent.click(screen.getByText('Send feedback'))
+      write('Please add a dark mode')
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+      expect((await screen.findByRole('alert')).textContent).toContain('Could not send right now')
+      expect((screen.getByPlaceholderText('Type here...') as HTMLTextAreaElement).value).toBe('Please add a dark mode')
+      expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(false)
+    })
+
+    it('says when the daily limit is reached', async () => {
+      vi.mocked(feedback.sendFeedback).mockResolvedValue('rate_limited')
+      await open(withCharts)
+      fireEvent.click(screen.getByText('Send feedback'))
+      write('One more thing')
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+      expect((await screen.findByRole('alert')).textContent).toContain('Try again tomorrow')
+    })
+
+    it('locks the button while sending', async () => {
+      let finish: (v: 'ok') => void = () => {}
+      vi.mocked(feedback.sendFeedback).mockReturnValue(new Promise((r) => (finish = r)))
+      await open(withCharts)
+      fireEvent.click(screen.getByText('Send feedback'))
+      write('Hello')
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+      expect((await screen.findByRole('button', { name: 'Sending...' }) as HTMLButtonElement).disabled).toBe(true)
+      await act(async () => finish('ok'))
+      await screen.findByText('Thank you!')
+    })
+
+    it('closes with Cancel and discards the text', async () => {
+      await open(withCharts)
+      fireEvent.click(screen.getByText('Send feedback'))
+      write('Draft')
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+      expect(dialog()).toBeNull()
+      fireEvent.click(screen.getByText('Send feedback'))
+      expect((screen.getByPlaceholderText('Type here...') as HTMLTextAreaElement).value).toBe('')
+    })
+
+    it('is in Chinese and sends the language', async () => {
+      await open(withCharts, 'zh')
+      fireEvent.click(screen.getByText('给我反馈'))
+      fireEvent.change(screen.getByPlaceholderText('在这里输入...'), { target: { value: '很好用' } })
+      fireEvent.click(screen.getByRole('button', { name: '发送' }))
+      await screen.findByText('谢谢！')
+      expect(feedback.sendFeedback).toHaveBeenCalledWith('很好用', 'zh')
+    })
   })
 
   it('is not shown under the score before submitting', () => {
@@ -983,7 +1067,7 @@ describe('support card', () => {
 
     it('starts open, with a way to minimize', async () => {
       await open(withCharts)
-      expect(screen.getByText('Buy me a coffee / feedback')).toBeTruthy()
+      expect(screen.getByText('Buy me a coffee')).toBeTruthy()
       expect(screen.getByRole('button', { name: 'Minimize' })).toBeTruthy()
     })
 
@@ -992,7 +1076,7 @@ describe('support card', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Minimize' }))
       expect(events.trackSupport).toHaveBeenCalledWith('coffee_minimized')
       expect(events.trackSupport).toHaveBeenCalledTimes(1)
-      expect(screen.queryByText('Buy me a coffee / feedback')).toBeNull()
+      expect(screen.queryByText('Buy me a coffee')).toBeNull()
       expect(screen.getByText('Found it helpful?')).toBeTruthy()
       expect(screen.getByRole('button', { name: /Expand/ }).getAttribute('aria-expanded')).toBe('false')
     })
@@ -1001,7 +1085,7 @@ describe('support card', () => {
       await open(withCharts)
       fireEvent.click(screen.getByRole('button', { name: 'Minimize' }))
       fireEvent.click(screen.getByRole('button', { name: /Expand/ }))
-      expect(screen.getByText('Buy me a coffee / feedback')).toBeTruthy()
+      expect(screen.getByText('Buy me a coffee')).toBeTruthy()
       expect(events.trackSupport).toHaveBeenCalledTimes(1)
     })
 
@@ -1011,13 +1095,13 @@ describe('support card', () => {
       cleanup()
       window.history.replaceState(null, '', '/')
       await open(withCharts)
-      expect(screen.queryByText('Buy me a coffee / feedback')).toBeNull()
+      expect(screen.queryByText('Buy me a coffee')).toBeNull()
       expect(screen.getByRole('button', { name: /Expand/ })).toBeTruthy()
     })
 
     it('counts a click on the coffee button', async () => {
       await open(withCharts)
-      fireEvent.click(screen.getByText('Buy me a coffee / feedback'))
+      fireEvent.click(screen.getByText('Buy me a coffee'))
       expect(events.trackSupport).toHaveBeenCalledWith('coffee_clicked')
     })
 
@@ -1074,12 +1158,12 @@ describe('support card', () => {
     openHistory()
     fireEvent.click(screen.getByText('546 points'))
     await screen.findByText('Your score is saved')
-    expect(screen.queryByText('Buy me a coffee / feedback')).toBeNull()
+    expect(screen.queryByText('Buy me a coffee')).toBeNull()
   })
 
   it('is shown in Chinese', async () => {
     await open(withCharts, 'zh')
-    expect(screen.getByText('给Ta打赏 / 反馈')).toBeTruthy()
+    expect(screen.getByText('给Ta打赏')).toBeTruthy()
   })
 })
 

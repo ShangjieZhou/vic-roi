@@ -92,8 +92,9 @@ export function partnerPoints(qualifies: boolean): number {
   return qualifies ? 50 : 0
 }
 
-// The largest income the form accepts. The score itself caps out at 170,000.
-export const EARNINGS_INPUT_MAX = 1_000_000
+// The largest income the form accepts. The score itself caps out at 170,000, so a higher claim earns no extra
+// points. Anything above this limit is treated as a typo or a false claim.
+export const EARNINGS_INPUT_MAX = 300_000
 export const EARNINGS_MIN = 80_000
 export const EARNINGS_CAP = 170_000
 
@@ -182,4 +183,17 @@ export function parseVptInput(raw: unknown): VptInput | null {
   if (typeof r.partnerQualifies !== 'boolean') return null
   if (!int(r.annualEarnings, 0, 10_000_000)) return null
   return r as unknown as VptInput
+}
+
+// The youngest age at which the form assumes a candidate could have started skilled work.
+const WORKING_AGE_MIN = 15
+
+export type PlausibilityIssue = 'earnings_too_high' | 'experience_exceeds_age'
+
+// Catches answers that pass the range checks but cannot be true. The server runs it before saving, so a forged
+// request cannot push a false score into the ranking charts.
+export function plausibilityIssue(input: VptInput): PlausibilityIssue | null {
+  if (input.annualEarnings > EARNINGS_INPUT_MAX) return 'earnings_too_high'
+  if (input.experienceYears > input.age - WORKING_AGE_MIN) return 'experience_exceeds_age'
+  return null
 }

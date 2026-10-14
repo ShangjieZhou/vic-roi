@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { COFFEE_URL, feedbackUrl, turnstileSiteKey } from './config'
+import { COFFEE_URL, turnstileSiteKey } from './config'
 
 afterEach(() => vi.unstubAllEnvs())
 
@@ -24,18 +24,6 @@ describe('turnstileSiteKey', () => {
     expect(turnstileSiteKey()).toBeNull()
     vi.stubEnv('VITE_TURNSTILE_SITE_KEY', 'now-set')
     expect(turnstileSiteKey()).toBe('now-set')
-  })
-})
-
-describe('feedbackUrl', () => {
-  it('is null until a form link is set, so the button stays hidden', () => {
-    vi.stubEnv('VITE_FEEDBACK_URL', '')
-    expect(feedbackUrl()).toBeNull()
-  })
-
-  it('returns the link, trimmed', () => {
-    vi.stubEnv('VITE_FEEDBACK_URL', '  https://forms.gle/example  ')
-    expect(feedbackUrl()).toBe('https://forms.gle/example')
   })
 })
 

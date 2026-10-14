@@ -5,7 +5,9 @@ import {
   calculateVpt,
   earningsPoints,
   experiencePoints,
+  EARNINGS_INPUT_MAX,
   parseVptInput,
+  plausibilityIssue,
   resolveDraft,
   type VptDraft,
 } from '../supabase/functions/_shared/scoring'
@@ -124,4 +126,18 @@ describe('parseVptInput', () => {
     expect(parseVptInput({ ...valid, partnerQualifies: 'unsure' })).toBeNull()
     expect(parseVptInput(null)).toBeNull()
   })
+})
+
+describe('plausibilityIssue', () => {
+  const ok = {
+    location: 'onshore' as const, age: 35, english: 'proficient' as const, experienceYears: 10,
+    education: 'masters' as const, skillLevel: 1 as const, partnerQualifies: false, annualEarnings: 120_000,
+  }
+  it('accepts ordinary answers', () => expect(plausibilityIssue(ok)).toBeNull())
+  it('accepts an income at the form limit', () =>
+    expect(plausibilityIssue({ ...ok, annualEarnings: EARNINGS_INPUT_MAX })).toBeNull())
+  it('rejects an income above the form limit', () =>
+    expect(plausibilityIssue({ ...ok, annualEarnings: EARNINGS_INPUT_MAX + 1 })).toBe('earnings_too_high'))
+  it('rejects more experience than the age allows', () =>
+    expect(plausibilityIssue({ ...ok, age: 22, experienceYears: 10 })).toBe('experience_exceeds_age'))
 })

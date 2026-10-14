@@ -5,6 +5,8 @@
 //                                           this device already has a submission and replace was not asked for.
 //   403 { error: 'bot_check_failed' }       Turnstile is on and the token did not verify.
 //   400 invalid_input | invalid_device | invalid_occupation
+//   422 { error: 'implausible_input', reason } the answers pass validation but cannot be true, such as an income
+//                                           above the form limit or more years of experience than the age allows.
 //   occupationCode must be on the official list. occupation is free text, used only when no code is given.
 //
 // A device may hold one submission. Submitting again needs replace: true, which deletes the earlier one.
@@ -14,7 +16,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { normalizeOccupation } from '../_shared/insights.ts'
 import { OCCUPATION_BY_CODE, occupationGroup } from '../_shared/occupations.ts'
-import { calculateVpt, parseVptInput } from '../_shared/scoring.ts'
+import { calculateVpt, parseVptInput, plausibilityIssue } from '../_shared/scoring.ts'
 import { verifyTurnstile } from '../_shared/turnstile.ts'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -112,6 +114,8 @@ async function handlePost(req: Request): Promise<Response> {
   }
   const input = parseVptInput(body?.input)
   if (!input) return json({ error: 'invalid_input' }, 400)
+  const implausible = plausibilityIssue(input)
+  if (implausible) return json({ error: 'implausible_input', reason: implausible }, 422)
   if (typeof body?.deviceId !== 'string' || !UUID.test(body.deviceId)) return json({ error: 'invalid_device' }, 400)
   const occupation = resolveOccupation(body?.occupationCode, body?.occupation)
   if (occupation === 'invalid') return json({ error: 'invalid_occupation' }, 400)

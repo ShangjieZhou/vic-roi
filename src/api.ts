@@ -29,6 +29,7 @@ export type SubmitOutcome =
   | { status: 'already_submitted'; existing: { id: string; total: number } }
   | { status: 'bot_check_failed' }
   | { status: 'invalid_occupation' }
+  | { status: 'implausible_input' }
   | { status: 'error' }
 
 export interface SubmitOptions {
@@ -63,6 +64,7 @@ export async function submitScore(
     }
     if (res.status === 403 && body.error === 'bot_check_failed') return { status: 'bot_check_failed' }
     if (res.status === 400 && body.error === 'invalid_occupation') return { status: 'invalid_occupation' }
+    if (res.status === 422 && body.error === 'implausible_input') return { status: 'implausible_input' }
     if (!res.ok) return { status: 'error' }
     return {
       status: 'ok',

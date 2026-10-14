@@ -8,10 +8,3 @@ export function turnstileSiteKey(): string | null {
 
 // Where tips go. It is a public page, so it lives in the code.
 export const COFFEE_URL = 'https://buymeacoffee.com/shangjie'
-
-// A link to a feedback form, set as VITE_FEEDBACK_URL. The feedback button is hidden until it is set.
-// Read at call time so tests can change it.
-export function feedbackUrl(): string | null {
-  const url = import.meta.env.VITE_FEEDBACK_URL as string | undefined
-  return url && url.trim() !== '' ? url.trim() : null
-}
