@@ -88,6 +88,8 @@ describe('wizard flow', () => {
     pick('You are single, have an Australian partner, or do not meet the requirements above')
     expect(screen.getByText('Step 7 of 7')).toBeTruthy()
     pick('I am offshore')
+    expect(screen.queryByLabelText(EARNINGS)).toBeNull()
+    pick('See my score')
     // Offshore counts as 0 income points, still out of 950, with the income section kept.
     expect(screen.getByText('Offshore: counts as 0 income points')).toBeTruthy()
     expect(screen.getByText('Victorian skilled earnings')).toBeTruthy()
@@ -97,11 +99,12 @@ describe('wizard flow', () => {
     expect(screen.getByText('Submit and compare my score against others')).toBeTruthy()
   })
 
-  it('puts the offshore option above the earnings field and does not autofocus the field', () => {
+  it('puts the location choice above the earnings field and does not autofocus the field', () => {
     render(<App />)
     answerUpToPartner()
     pick('You are single, have an Australian partner, or do not meet the requirements above')
     const offshore = screen.getByText('I am offshore')
+    expect((screen.getByLabelText('I am in Australia') as HTMLInputElement).checked).toBe(true)
     const field = screen.getByLabelText(EARNINGS)
     // DOCUMENT_POSITION_FOLLOWING (4) means the field comes after the offshore option.
     expect(offshore.compareDocumentPosition(field) & 4).toBe(4)
@@ -154,6 +157,7 @@ describe('simplified Chinese', () => {
     expect(screen.getByText('您已在 SkillSelect 意向书（EOI）中申报 10 分配偶技能分')).toBeTruthy()
     pick('您单身、配偶是澳大利亚人，或不满足上述要求')
     pick('我在境外')
+    pick('查看我的分数')
     expect(screen.getByText('您的维州积分测试（VPT）估算分数')).toBeTruthy()
     expect(screen.getByText('满分 950')).toBeTruthy()
     expect(screen.getByText('境外：收入部分按 0 分计算')).toBeTruthy()
@@ -229,6 +233,7 @@ describe('simplified Chinese', () => {
     pick('技能等级 1')
     pick('您单身、配偶是澳大利亚人，或不满足上述要求')
     pick('我在境外')
+    pick('查看我的分数')
     expect(screen.getByText('提交并与其他候选人对比我的分数')).toBeTruthy()
     expect(screen.getByText('填写后可对比同职业候选人。')).toBeTruthy()
     expect(screen.getByText('匿名提交，无需姓名、邮箱或账号。')).toBeTruthy()

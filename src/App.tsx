@@ -329,11 +329,12 @@ function Question(props: {
           title={t('q.earn.title')}
           hint={t('q.earn.hint')}
           min={0} max={EARNINGS_INPUT_MAX} initial={answers.annualEarnings} prefix="$" required
-          // The offshore option sits above the field. Skipping autofocus keeps the keyboard from hiding it.
+          // The location choice sits above the field. Skipping autofocus keeps the keyboard from hiding it.
           autoFocus={false}
           onSubmit={(annualEarnings) => onAnswer({ annualEarnings, location: 'onshore' })}
           submitLabel={t('q.earn.submit')}
           alternative={{
+            inLabel: t('q.earn.onshore'),
             label: t('q.earn.offshore'),
             hint: t('q.earn.offshore.hint'),
             onPick: () => onAnswer({ annualEarnings: 0, location: 'offshore' }),
@@ -399,12 +400,13 @@ function NumberStep(props: {
   required?: boolean
   submitLabel?: string
   autoFocus?: boolean
-  // Shown above the field, as its own option.
-  alternative?: { label: string; hint: string; onPick: () => void }
+  // A radio pair above the field. Choosing the alternative hides the field and submits it through onPick.
+  alternative?: { inLabel: string; label: string; hint: string; onPick: () => void }
   onSubmit: (value: number) => void
 }) {
   const { t } = useI18n()
   const [text, setText] = useState(props.initial !== undefined ? String(props.initial) : '')
+  const [skipped, setSkipped] = useState(false)
   const value = text === '' ? (props.required ? NaN : 0) : Number(text)
   const valid = Number.isInteger(value) && value >= props.min && value <= props.max
   const fmt = (n: number) => (props.prefix === '$' ? `$${money.format(n)}` : String(n))
@@ -421,43 +423,54 @@ function NumberStep(props: {
       noValidate
       onSubmit={(e) => {
         e.preventDefault()
-        if (valid) props.onSubmit(value)
+        if (skipped) props.alternative?.onPick()
+        else if (valid) props.onSubmit(value)
       }}
     >
       <Title>{props.title}</Title>
       {props.alternative && (
-        <>
-          <button type="button" onClick={props.alternative.onPick} className={`${CARD} w-full`}>
-            <span className="block font-medium">{props.alternative.label}</span>
-            <span className="mt-0.5 block text-sm text-stone-500">{props.alternative.hint}</span>
-          </button>
-          <p className="my-4 text-center text-xs text-stone-400">{t('q.earn.or')}</p>
-        </>
+        <div className="mb-4 grid gap-3">
+          <label className={`${CARD} flex cursor-pointer items-center gap-3`}>
+            <input type="radio" name="earn-location" checked={!skipped} onChange={() => setSkipped(false)} className="accent-accent" />
+            <span className="block font-medium">{props.alternative.inLabel}</span>
+          </label>
+          <label className={`${CARD} flex cursor-pointer items-center gap-3`}>
+            <input type="radio" name="earn-location" checked={skipped} onChange={() => setSkipped(true)} className="accent-accent" />
+            <span>
+              <span className="block font-medium">{props.alternative.label}</span>
+              <span className="mt-0.5 block text-sm text-stone-500">{props.alternative.hint}</span>
+            </span>
+          </label>
+        </div>
       )}
-      <div className="flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-5 py-4 focus-within:border-accent">
-        {props.prefix && <span className="text-stone-400">{props.prefix}</span>}
-        <input
-          autoFocus={props.autoFocus ?? true}
-          type="text"
-          inputMode="numeric"
-          enterKeyHint={props.submitLabel ? 'done' : 'next'}
-          autoComplete="off"
-          value={props.prefix === '$' && text !== '' ? money.format(Number(text)) : text}
-          onChange={(e) => setText(e.target.value.replace(/\D/g, '').slice(0, String(props.max).length + 1))}
-          className="min-h-8 w-full bg-transparent text-2xl outline-none"
-          aria-label={props.title}
-        />
-        {props.suffix && <span className="text-stone-400">{props.suffix}</span>}
-      </div>
-      <p className="mt-3 text-sm text-stone-500">{props.hint}</p>
-      {outOfRange && (
-        <p role="alert" className="mt-2 text-sm text-amber-700">
-          {t('q.range', { min: fmt(props.min), max: fmt(props.max) })}
-        </p>
+      {!skipped && (
+        <>
+          <div className="flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-5 py-4 focus-within:border-accent">
+            {props.prefix && <span className="text-stone-400">{props.prefix}</span>}
+            <input
+              autoFocus={props.autoFocus ?? true}
+              type="text"
+              inputMode="numeric"
+              enterKeyHint={props.submitLabel ? 'done' : 'next'}
+              autoComplete="off"
+              value={props.prefix === '$' && text !== '' ? money.format(Number(text)) : text}
+              onChange={(e) => setText(e.target.value.replace(/\D/g, '').slice(0, String(props.max).length + 1))}
+              className="min-h-8 w-full bg-transparent text-2xl outline-none"
+              aria-label={props.title}
+            />
+            {props.suffix && <span className="text-stone-400">{props.suffix}</span>}
+          </div>
+          <p className="mt-3 text-sm text-stone-500">{props.hint}</p>
+          {outOfRange && (
+            <p role="alert" className="mt-2 text-sm text-amber-700">
+              {t('q.range', { min: fmt(props.min), max: fmt(props.max) })}
+            </p>
+          )}
+        </>
       )}
       <button
         type="submit"
-        disabled={!valid}
+        disabled={!skipped && !valid}
         className="mt-6 min-h-14 w-full rounded-xl bg-accent px-5 py-3 text-base font-medium text-white transition enabled:hover:opacity-90 enabled:active:opacity-80 disabled:opacity-40"
       >
         {props.submitLabel ?? t('common.continue')}
