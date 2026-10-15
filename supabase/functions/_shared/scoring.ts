@@ -66,8 +66,9 @@ const ENGLISH_POINTS: Record<EnglishLevel, number> = {
 }
 
 // experienceYears holds a band code chosen in the wizard, not literal years:
-// 0 none -> 0, 1 under 1 year -> 20, 2 for 1 to 3 -> 40, 4 for 3 to 5 -> 60, 6 for 6 to 8 -> 80, 9 for more than 8 -> 100.
-// Codes in between fall into the band below them, so older literal-year submissions score as before.
+// 0 for 0 years -> 0, 1 for 1 year -> 20, 2 for 2 to 3 years -> 40, 4 for 4 to 5 -> 60, 6 for 6 to 7 -> 80, 9 for more than 8 -> 100.
+// Codes in between fall into the band below them, so older literal-year submissions score as before. The points
+// never changed when the labels were reworded, so saved submissions keep their score.
 export function experiencePoints(years: number): number {
   if (years >= 9) return 100
   if (years >= 6) return 80

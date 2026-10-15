@@ -74,7 +74,7 @@ function reachSubmitCard() {
   renderApp()
   type('How old are you?', '30')
   pick('Proficient')
-  pick('3 to 5 years')
+  pick('4 to 5 years')
   pick("Bachelor's or Honours")
   pick('Skill level 1')
   pick('You are single, have an Australian partner, or do not meet the requirements above')
@@ -146,7 +146,7 @@ describe('submitting while fewer than 10 candidates have submitted overall', () 
     renderApp()
     type('您的年龄是？', '30')
     pick('熟练（Proficient）')
-    pick('3 至 5 年')
+    pick('4 至 5 年')
     pick("学士或荣誉学士（Bachelor's or Honours）")
     pick('技能等级 1')
     pick('您单身、配偶是澳大利亚人，或不满足上述要求')
@@ -419,7 +419,7 @@ describe('the analysis page', () => {
       const lines = [
         ['Top 22% · Median score: 300', 'People typically are aged between 20 and 29'],
         ['Top 79% · Median score: 100', 'People typically have proficient English'],
-        ['Top 60% · Median score: 60', 'People typically have 3 to 5 years of experience'],
+        ['Top 60% · Median score: 60', 'People typically have 4 to 5 years of experience'],
         ['Top 67% · Median score: 50', "People typically hold a bachelor's or honours degree"],
         ['Top 37% · Median score: 50', 'People typically work in a skill level 1 occupation'],
         ['Top 53% · Median score: 0', 'People typically do not claim partner points'],
@@ -851,7 +851,7 @@ describe('top occupations', () => {
     for (const sentence of [
       'People in this occupation typically are aged between 20 and 29',
       'People in this occupation typically have superior English',
-      'People in this occupation typically have 3 to 5 years of experience',
+      'People in this occupation typically have 4 to 5 years of experience',
       "People in this occupation typically hold a master's degree",
       'People in this occupation typically work in a skill level 1 occupation',
       'People in this occupation typically do not claim partner points',
@@ -1449,7 +1449,7 @@ describe('one submission per device', () => {
     renderApp()
     type('您的年龄是？', '30')
     pick('熟练（Proficient）')
-    pick('3 至 5 年')
+    pick('4 至 5 年')
     pick("学士或荣誉学士（Bachelor's or Honours）")
     pick('技能等级 1')
     pick('您单身、配偶是澳大利亚人，或不满足上述要求')
@@ -1537,7 +1537,7 @@ describe('the bot check', () => {
     renderApp()
     type('您的年龄是？', '30')
     pick('熟练（Proficient）')
-    pick('3 至 5 年')
+    pick('4 至 5 年')
     pick("学士或荣誉学士（Bachelor's or Honours）")
     pick('技能等级 1')
     pick('您单身、配偶是澳大利亚人，或不满足上述要求')

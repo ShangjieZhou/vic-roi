@@ -23,14 +23,15 @@ const ENGLISH: Choice<EnglishLevel>[] = [
   { value: 'proficient', label: 'opt.english.proficient', hint: 'opt.english.proficient.hint' },
   { value: 'superior', label: 'opt.english.superior', hint: 'opt.english.superior.hint' },
 ]
-// Values are band codes, not literal years: 0 none, 1 under 1 year, 2 for 1 to 3, 4 for 3 to 5, 6 for 6 to 8, 9 for more than 8.
+// Values are band codes, not literal years: 0 for 0 years, 1 for 1 year, 2 for 2 to 3, 4 for 4 to 5, 6 for 6 to 7, 9 for more than 8.
+// A candidate between two bands picks the lower one, as the question says.
 const EXPERIENCE: Choice<number>[] = [
-  { value: 0, label: 'opt.exp.0' },
-  { value: 1, label: 'opt.exp.1' },
-  { value: 2, label: 'opt.exp.2' },
-  { value: 4, label: 'opt.exp.4' },
-  { value: 6, label: 'opt.exp.6' },
-  { value: 9, label: 'opt.exp.9' },
+  { value: 0, label: 'opt.exp.0', hint: 'opt.exp.0.hint' },
+  { value: 1, label: 'opt.exp.1', hint: 'opt.exp.1.hint' },
+  { value: 2, label: 'opt.exp.2', hint: 'opt.exp.2.hint' },
+  { value: 4, label: 'opt.exp.4', hint: 'opt.exp.4.hint' },
+  { value: 6, label: 'opt.exp.6', hint: 'opt.exp.6.hint' },
+  { value: 9, label: 'opt.exp.9', hint: 'opt.exp.9.hint' },
 ]
 const EDUCATION: Choice<EducationLevel>[] = [
   { value: 'other', label: 'opt.edu.other', hint: 'opt.edu.other.hint' },
@@ -302,6 +303,7 @@ function Question(props: {
       body = (
         <ChoiceStep
           title={t('q.exp.title')}
+          intro={<p className="-mt-3 mb-5 text-sm leading-relaxed text-stone-500">{t('q.exp.hint')}</p>}
           options={EXPERIENCE}
           onPick={(experienceYears) => onAnswer({ experienceYears })}
         />

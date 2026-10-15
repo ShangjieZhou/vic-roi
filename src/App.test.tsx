@@ -29,10 +29,31 @@ const EARNINGS = 'What is your annual earnings from current skilled employment i
 function answerUpToPartner(skill = 'Skill level 1') {
   type('How old are you?', '30')
   pick('Proficient')
-  pick('3 to 5 years')
+  pick('4 to 5 years')
   pick("Bachelor's or Honours")
   pick(skill)
 }
+
+describe('experience step', () => {
+  const toExperience = () => {
+    render(<App />)
+    type('How old are you?', '30')
+    pick('Proficient')
+  }
+
+  it('lists the six ranges with a hint on where each one ends', () => {
+    toExperience()
+    for (const label of ['0 years', '1 year', '2 to 3 years', '4 to 5 years', '6 to 7 years', 'More than 8 years']) {
+      expect(screen.getByText(label)).toBeTruthy()
+    }
+    expect(screen.getByText('At least 2 years, under 4 years')).toBeTruthy()
+  })
+
+  it('tells people between two ranges to pick the lower one', () => {
+    toExperience()
+    expect(screen.getByText(/pick the lower one\. For example, 3\.5 years counts as 2 to 3 years/)).toBeTruthy()
+  })
+})
 
 describe('wizard flow', () => {
   it('starts with age and has seven steps', () => {
@@ -150,7 +171,7 @@ describe('simplified Chinese', () => {
     renderApp()
     type('您的年龄是？', '30')
     pick('熟练（Proficient）')
-    pick('3 至 5 年')
+    pick('4 至 5 年')
     pick("学士或荣誉学士（Bachelor's or Honours）")
     pick('技能等级 1')
     expect(screen.getByText('您是否符合配偶技能分的条件？')).toBeTruthy()
@@ -172,7 +193,7 @@ describe('simplified Chinese', () => {
     renderApp()
     type('您的年龄是？', '30')
     pick('熟练（Proficient）')
-    pick('3 至 5 年')
+    pick('4 至 5 年')
     pick("学士或荣誉学士（Bachelor's or Honours）")
     pick('跳过，我不确定')
     pick('跳过，我不确定')
@@ -201,7 +222,7 @@ describe('simplified Chinese', () => {
       renderApp()
       type(lang === 'en' ? 'How old are you?' : '您的年龄是？', '30')
       pick(lang === 'en' ? 'Proficient' : '熟练（Proficient）')
-      pick(lang === 'en' ? '3 to 5 years' : '3 至 5 年')
+      pick(lang === 'en' ? '4 to 5 years' : '4 至 5 年')
       pick(lang === 'en' ? "Bachelor's or Honours" : "学士或荣誉学士（Bachelor's or Honours）")
       expect(screen.getByText(wording)).toBeTruthy() // skill step
       pick(skill)
@@ -216,7 +237,7 @@ describe('simplified Chinese', () => {
     renderApp()
     type('您的年龄是？', '30')
     pick('熟练（Proficient）')
-    pick('3 至 5 年')
+    pick('4 至 5 年')
     expect(screen.getByText('其他资格（Other qualification）')).toBeTruthy()
     expect(screen.getByText("学士或荣誉学士（Bachelor's or Honours）")).toBeTruthy()
     expect(screen.getByText("硕士（Master's）")).toBeTruthy()
@@ -228,7 +249,7 @@ describe('simplified Chinese', () => {
     renderApp()
     type('您的年龄是？', '30')
     pick('熟练（Proficient）')
-    pick('3 至 5 年')
+    pick('4 至 5 年')
     pick("学士或荣誉学士（Bachelor's or Honours）")
     pick('技能等级 1')
     pick('您单身、配偶是澳大利亚人，或不满足上述要求')
