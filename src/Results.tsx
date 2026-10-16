@@ -313,26 +313,45 @@ function InsightsPanel(props: {
   return (
     <div className="mt-10 grid gap-8 [&>*]:min-w-0">
       {isRanked(overall) ? (
-        <>
-          <PercentileBar insights={insights} />
-          <Comparison insights={insights} />
-          <section className={SECTION_CARD}>
-            <h3 className={`mb-4 ${SECTION_TITLE}`}>{t('res.breakdown')}</h3>
-            <ScoreBreakdown low={props.result} high={props.result} earningsNote={props.earningsNote} />
-          </section>
-          <SectionCharts result={props.result} insights={insights} />
-          <SupportCard />
-        </>
+        <AnalysisView insights={insights} result={props.result} earningsNote={props.earningsNote} afterCharts={<SupportCard />} />
       ) : (
         <WaitingCard insights={insights} onRefresh={props.onRefresh} />
       )}
-
-      {isRanked(overall) && <OccupationBreakdown insights={insights} result={props.result} />}
 
       <p className="text-xs leading-relaxed text-stone-400">{t('ins.disclaimer')}</p>
 
       <ShareLink />
     </div>
+  )
+}
+
+// The comparison a candidate sees once enough people have submitted. Without a result there is no section
+// breakdown, so it shows only the overall and group comparison. The parent lays the blocks out in a grid.
+// The admin ranking simulator reuses it, so both screens stay identical.
+export function AnalysisView(props: {
+  insights: Insights
+  result?: VptResult
+  earningsNote?: string
+  afterCharts?: React.ReactNode
+}) {
+  const { t } = useI18n()
+  const { insights, result } = props
+  return (
+    <>
+      <PercentileBar insights={insights} />
+      <Comparison insights={insights} />
+      {result && (
+        <>
+          <section className={SECTION_CARD}>
+            <h3 className={`mb-4 ${SECTION_TITLE}`}>{t('res.breakdown')}</h3>
+            <ScoreBreakdown low={result} high={result} earningsNote={props.earningsNote ?? ''} />
+          </section>
+          <SectionCharts result={result} insights={insights} />
+        </>
+      )}
+      {props.afterCharts}
+      {result && <OccupationBreakdown insights={insights} result={result} />}
+    </>
   )
 }
 

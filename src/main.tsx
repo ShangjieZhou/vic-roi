@@ -5,8 +5,8 @@ import { startAnalytics } from './analytics'
 import { LangProvider } from './i18n'
 import './index.css'
 
-// The internal dashboard loads only at /admin, as its own chunk, and visits to it are not counted.
-const isAdmin = window.location.pathname === '/admin'
+// The internal dashboard loads only under /admin, as its own chunk, and visits to it are not counted.
+const isAdmin = /^\/admin(\/|$)/.test(window.location.pathname)
 const AdminApp = lazy(() => import('./admin/AdminApp').then((m) => ({ default: m.AdminApp })))
 
 if (!isAdmin) startAnalytics()

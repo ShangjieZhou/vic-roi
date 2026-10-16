@@ -65,3 +65,14 @@ export function melbourne(iso: string): string {
     minute: '2-digit',
   })
 }
+
+// The band code the form stores for a number of years of experience.
+export function experienceBand(years: number): string {
+  if (years >= 9) return '9'
+  if (years >= 6) return '6'
+  if (years >= 4) return '4'
+  if (years >= 2) return '2'
+  return years >= 1 ? '1' : '0'
+}
+
+export const money = (n: number): string => `$${Math.round(n).toLocaleString('en-AU')}`

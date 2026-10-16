@@ -7,12 +7,18 @@ import { labelFor, orderRows, percent } from './labels'
 import * as types from './types'
 import type { AdminStats } from './types'
 
-vi.mock('./types', async (original) => ({ ...(await original<typeof import('./types')>()), loadStats: vi.fn() }))
+vi.mock('./types', async (original) => ({
+  ...(await original<typeof import('./types')>()),
+  loadStats: vi.fn(),
+  loadTimeline: vi.fn(),
+  loadSubmissions: vi.fn(),
+  simulateRanking: vi.fn(),
+}))
 
 const stats: AdminStats = {
   generatedAt: '2026-10-16T01:00:00Z',
   totals: { n: 200, last24h: 20, last7d: 150, first: '2026-10-13T00:00:00Z', last: '2026-10-16T00:00:00Z', withCode: 150 },
-  daily: [{ day: '2026-10-15', n: 5 }, { day: '2026-10-16', n: 9 }],
+  daily: [],
   score: { min: 250, max: 800, mean: 600, sd: 90, p10: 480, p25: 545, median: 615, p75: 666, p90: 707 },
   hist: Array.from({ length: 96 }, (_, i) => (i >= 50 && i <= 70 ? 10 : 0)),
   cuts: {
@@ -33,6 +39,9 @@ beforeEach(() => {
   vi.stubEnv('VITE_SUPABASE_URL', 'https://example.supabase.co')
   vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key')
   vi.mocked(types.loadStats).mockReset()
+  vi.mocked(types.loadTimeline).mockReset().mockResolvedValue({ status: 'ok', data: { range: '24h', bucket: 3600, total: 14, series: [{ t: '2026-10-16T09:00', n: 6 }, { t: '2026-10-16T10:00', n: 8 }] } })
+  vi.mocked(types.loadSubmissions).mockReset().mockResolvedValue({ status: 'ok', data: { total: 0, rows: [] } })
+  vi.mocked(types.simulateRanking).mockReset()
 })
 afterEach(() => {
   cleanup()
@@ -110,6 +119,41 @@ describe('labels', () => {
   })
 })
 
+describe('submissions over time', () => {
+  const open = async () => {
+    saveSession({ token: 'tok', expiresAt: Date.now() + 60_000 })
+    vi.mocked(types.loadStats).mockResolvedValue({ status: 'ok', stats })
+    render(<AdminApp />)
+    await screen.findByText('Submissions over time')
+  }
+
+  it('starts on the last 24 hours, one bar per hour', async () => {
+    await open()
+    expect(types.loadTimeline).toHaveBeenCalledWith('tok', '24h')
+    expect(screen.getByText('One bar per hour, Melbourne time')).toBeTruthy()
+    expect(await screen.findByText('14')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Last 24 hours' }).getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it.each([
+    ['Last hour', '1h', 'One bar per minute'],
+    ['Last 7 days', '7d', 'One bar per 4 hours'],
+    ['Last 30 days', '30d', 'One bar per day'],
+  ])('switches to %s', async (label, range, note) => {
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: label }))
+    await waitFor(() => expect(types.loadTimeline).toHaveBeenLastCalledWith('tok', range))
+    expect(screen.getByText(`${note}, Melbourne time`)).toBeTruthy()
+    expect(screen.getByRole('button', { name: label }).getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('says when a range could not load', async () => {
+    vi.mocked(types.loadTimeline).mockResolvedValue({ status: 'error' })
+    await open()
+    expect(await screen.findByText(/Could not load this range/)).toBeTruthy()
+  })
+})
+
 describe('AdminApp', () => {
   it('asks for an email when not signed in, and tells search engines to skip it', () => {
     render(<AdminApp />)
@@ -129,6 +173,7 @@ describe('AdminApp', () => {
     expect(screen.getByText('很好用')).toBeTruthy()
     expect(screen.getByText('Professionals')).toBeTruthy()
     expect(screen.getByText('5 (5.0%)')).toBeTruthy()
+    expect(screen.getByText('Submissions over time')).toBeTruthy()
   })
 
   it('keeps showing the data after a reload in the same tab', async () => {

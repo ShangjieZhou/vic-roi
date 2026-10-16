@@ -29,11 +29,32 @@ export interface AdminStats {
   support: { event: string; devices: number; times: number }[]
 }
 
-export type AdminOutcome =
-  | { status: 'ok'; stats: AdminStats }
-  | { status: 'signed_out' | 'forbidden' | 'unconfigured' | 'error' }
+export interface SubmissionRow {
+  id: string
+  at: string
+  total: number
+  age: number
+  english: string
+  experience: number
+  education: string
+  skill: number
+  partner: boolean
+  income: number
+  location: string
+  occupation: string | null
+  code: string | null
+  breakdown: { key: string; points: number; max: number }[]
+}
 
-export async function loadStats(token: string): Promise<AdminOutcome> {
+export interface SubmissionPage {
+  total: number
+  rows: SubmissionRow[]
+}
+
+export type AdminResult<T> = { status: 'ok'; data: T } | { status: 'signed_out' | 'forbidden' | 'unconfigured' | 'bad_request' | 'error' }
+
+// One call to the admin function. It checks the sign-in token and the admin email on every request.
+export async function adminRequest<T>(token: string, body?: Record<string, unknown>): Promise<AdminResult<T>> {
   const base = import.meta.env.VITE_SUPABASE_URL as string | undefined
   if (!base) return { status: 'error' }
   try {
@@ -44,13 +65,51 @@ export async function loadStats(token: string): Promise<AdminOutcome> {
         apikey: (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ?? '',
         Authorization: `Bearer ${token}`,
       },
+      ...(body ? { body: JSON.stringify(body) } : {}),
     })
     if (res.status === 401) return { status: 'signed_out' }
     if (res.status === 403) return { status: 'forbidden' }
     if (res.status === 503) return { status: 'unconfigured' }
+    if (res.status === 400) return { status: 'bad_request' }
     if (!res.ok) return { status: 'error' }
-    return { status: 'ok', stats: (await res.json()) as AdminStats }
+    return { status: 'ok', data: (await res.json()) as T }
   } catch {
     return { status: 'error' }
   }
 }
+
+export type AdminOutcome = { status: 'ok'; stats: AdminStats } | { status: Exclude<AdminResult<never>['status'], 'ok'> }
+
+export async function loadStats(token: string): Promise<AdminOutcome> {
+  const out = await adminRequest<AdminStats>(token)
+  return out.status === 'ok' ? { status: 'ok', stats: out.data } : out
+}
+
+export interface SubmissionQuery {
+  filters: Record<string, unknown>
+  sort: { f: string; d: 'asc' | 'desc' }[]
+  limit: number
+  offset: number
+}
+
+export const loadSubmissions = (token: string, q: SubmissionQuery) =>
+  adminRequest<SubmissionPage>(token, { action: 'submissions', ...q })
+
+export type SimulateRequest =
+  | { mode: 'score'; total: number; location: 'onshore' | 'offshore'; occupationCode?: string }
+  | { mode: 'form'; input: Record<string, unknown>; occupationCode?: string }
+
+export const simulateRanking = (token: string, req: SimulateRequest) =>
+  adminRequest<{ insights: import('../../supabase/functions/_shared/insights').Insights }>(token, { action: 'simulate', ...req })
+
+export type TimelineRange = '1h' | '24h' | '7d' | '30d'
+
+export interface Timeline {
+  range: TimelineRange
+  // Seconds in one bar.
+  bucket: number
+  total: number
+  series: { t: string; n: number }[]
+}
+
+export const loadTimeline = (token: string, range: TimelineRange) => adminRequest<Timeline>(token, { action: 'timeline', range })
