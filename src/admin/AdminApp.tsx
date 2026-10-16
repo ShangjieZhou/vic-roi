@@ -123,7 +123,7 @@ export function AdminApp() {
                       e.preventDefault()
                       go(p.page)
                     }}
-                    className={`min-h-10 rounded-lg px-3 py-2 text-sm font-medium ${page === p.page ? 'bg-accent text-white' : 'text-stone-700 hover:bg-stone-100'}`}
+                    className={`min-h-11 flex-1 rounded-lg px-2 py-2.5 text-center text-sm font-medium sm:min-h-10 sm:flex-none sm:px-3 ${page === p.page ? 'bg-accent text-white' : 'text-stone-700 hover:bg-stone-100'}`}
                   >
                     {p.label}
                   </a>

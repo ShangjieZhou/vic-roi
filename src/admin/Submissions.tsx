@@ -5,7 +5,8 @@ import {
   toggleRule, type FilterForm, type SortField, type SortRule,
 } from './submissionQuery'
 import { loadSubmissions, type SubmissionPage, type SubmissionRow } from './types'
-import { BTN, CARD, INPUT, Problem, SELECT, TITLE } from './ui'
+import { ChevronIcon } from '../icons'
+import { BTN, CARD, INPUT, Problem, SELECT, TITLE, useCompact } from './ui'
 
 const PAGE_SIZE = 50
 
@@ -26,6 +27,9 @@ export function Submissions(props: { token: string; onExpired: () => void }) {
   const [page, setPage] = useState<SubmissionPage | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const compact = useCompact()
+  // On a phone the filters and sort rules start folded away so the results are not pushed off screen.
+  const [panelOpen, setPanelOpen] = useState(false)
 
   const load = useCallback(async () => {
     setBusy(true)
@@ -46,6 +50,7 @@ export function Submissions(props: { token: string; onExpired: () => void }) {
   const apply = () => {
     setOffset(0)
     setApplied(buildFilters(form))
+    setPanelOpen(false)
   }
   const reset = () => {
     setForm(emptyFilters)
@@ -64,6 +69,24 @@ export function Submissions(props: { token: string; onExpired: () => void }) {
 
   return (
     <div className="grid gap-5">
+      {compact && (
+        <button
+          type="button"
+          aria-expanded={panelOpen}
+          onClick={() => setPanelOpen(!panelOpen)}
+          className="flex min-h-12 w-full items-center justify-between rounded-2xl bg-white px-4 text-left shadow-sm"
+        >
+          <span className="font-semibold">
+            Filters and sort
+            {Object.keys(applied).length > 0 && (
+              <span className="ml-2 rounded-full bg-accent px-2 py-0.5 text-xs font-medium text-white">{Object.keys(applied).length} active</span>
+            )}
+          </span>
+          <ChevronIcon open={panelOpen} />
+        </button>
+      )}
+      {(!compact || panelOpen) && (
+        <>
       <form
         className={CARD}
         onSubmit={(e) => {
@@ -116,7 +139,7 @@ export function Submissions(props: { token: string; onExpired: () => void }) {
           </fieldset>
         </div>
         <div className="mt-5 flex gap-2">
-          <button type="submit" className="min-h-10 rounded-lg bg-accent px-4 text-sm font-semibold text-white">
+          <button type="submit" className="min-h-11 flex-1 rounded-lg bg-accent px-4 text-sm font-semibold text-white sm:min-h-10 sm:flex-none">
             Apply filters
           </button>
           <button type="button" className={BTN} onClick={reset}>
@@ -126,6 +149,8 @@ export function Submissions(props: { token: string; onExpired: () => void }) {
       </form>
 
       <SortBuilder rules={sort} onChange={changeSort} />
+        </>
+      )}
 
       {problem && <Problem status={problem} />}
 
@@ -135,7 +160,7 @@ export function Submissions(props: { token: string; onExpired: () => void }) {
           <p className="text-xs text-stone-500">{describeSort(sort)}</p>
         </div>
         {page && page.rows.length === 0 && <p className="mt-4 text-sm text-stone-500">No submissions match these filters.</p>}
-        {page && page.rows.length > 0 && <Table rows={page.rows} />}
+        {page && page.rows.length > 0 && (compact ? <CardList rows={page.rows} /> : <Table rows={page.rows} />)}
         <div className="mt-4 flex items-center justify-between gap-3 text-sm">
           <span className="text-stone-500">{page ? `${from.toLocaleString()} to ${to.toLocaleString()} of ${total.toLocaleString()}` : busy ? 'Loading...' : ''}</span>
           <div className="flex gap-2">
@@ -172,7 +197,7 @@ function Chip(props: { on: boolean; label: string; onToggle: () => void }) {
       type="button"
       aria-pressed={props.on}
       onClick={props.onToggle}
-      className={`min-h-9 rounded-full border px-3 text-sm ${props.on ? 'border-accent bg-accent text-white' : 'border-stone-300 bg-white text-stone-700 hover:bg-stone-50'}`}
+      className={`min-h-10 rounded-full border px-3 text-sm ${props.on ? 'border-accent bg-accent text-white' : 'border-stone-300 bg-white text-stone-700 hover:bg-stone-50'}`}
     >
       {props.label}
     </button>
@@ -188,27 +213,31 @@ function SortBuilder(props: { rules: SortRule[]; onChange: (rules: SortRule[]) =
       <p className="mt-0.5 mb-4 text-xs text-stone-500">Rule 1 decides the order. Each later rule breaks ties left by the rules above it.</p>
       <ol className="grid gap-2">
         {rules.map((r, i) => (
-          <li key={r.f} className="flex flex-wrap items-center gap-2">
-            <span className="w-14 text-sm text-stone-500">Rule {i + 1}</span>
-            <select aria-label={`Rule ${i + 1} field`} className={SELECT} value={r.f} onChange={(e) => onChange(setRuleField(rules, i, e.target.value as SortField))}>
-              {SORT_FIELDS.map((f) => (
-                <option key={f.value} value={f.value}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
-            <button className={BTN} aria-label={`Rule ${i + 1} direction`} onClick={() => onChange(toggleRule(rules, i))}>
-              {r.d === 'asc' ? 'Low to high' : 'High to low'}
-            </button>
-            <button className={BTN} aria-label={`Move rule ${i + 1} up`} disabled={i === 0} onClick={() => onChange(moveRule(rules, i, -1))}>
-              Up
-            </button>
-            <button className={BTN} aria-label={`Move rule ${i + 1} down`} disabled={i === rules.length - 1} onClick={() => onChange(moveRule(rules, i, 1))}>
-              Down
-            </button>
-            <button className={BTN} aria-label={`Remove rule ${i + 1}`} onClick={() => onChange(removeRule(rules, i))}>
-              Remove
-            </button>
+          <li key={r.f} className="grid gap-2 rounded-xl bg-stone-50 p-2 sm:flex sm:flex-wrap sm:items-center sm:bg-transparent sm:p-0">
+            <div className="flex items-center gap-2">
+              <span className="w-14 shrink-0 text-sm text-stone-500">Rule {i + 1}</span>
+              <select aria-label={`Rule ${i + 1} field`} className={`${SELECT} min-w-0 flex-1 sm:flex-none`} value={r.f} onChange={(e) => onChange(setRuleField(rules, i, e.target.value as SortField))}>
+                {SORT_FIELDS.map((f) => (
+                  <option key={f.value} value={f.value}>
+                    {f.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="grid grid-cols-4 gap-2 sm:flex">
+              <button className={`${BTN} col-span-2`} aria-label={`Rule ${i + 1} direction`} onClick={() => onChange(toggleRule(rules, i))}>
+                {r.d === 'asc' ? 'Low to high' : 'High to low'}
+              </button>
+              <button className={BTN} aria-label={`Move rule ${i + 1} up`} disabled={i === 0} onClick={() => onChange(moveRule(rules, i, -1))}>
+                Up
+              </button>
+              <button className={BTN} aria-label={`Move rule ${i + 1} down`} disabled={i === rules.length - 1} onClick={() => onChange(moveRule(rules, i, 1))}>
+                Down
+              </button>
+              <button className={`${BTN} col-span-4 sm:col-span-1`} aria-label={`Remove rule ${i + 1}`} onClick={() => onChange(removeRule(rules, i))}>
+                Remove
+              </button>
+            </div>
           </li>
         ))}
       </ol>
@@ -245,6 +274,70 @@ function Table({ rows }: { rows: SubmissionRow[] }) {
   )
 }
 
+// The phone layout: one card per submission, tapped open for the section points.
+function CardList({ rows }: { rows: SubmissionRow[] }) {
+  const [open, setOpen] = useState<string | null>(null)
+  return (
+    <ul className="mt-4 grid gap-2">
+      {rows.map((r) => {
+        const isOpen = open === r.id
+        return (
+          <li key={r.id} className="overflow-hidden rounded-xl border border-stone-200 bg-white">
+            <button type="button" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : r.id)} className="block min-h-14 w-full p-3 text-left">
+              <span className="flex items-baseline justify-between gap-3">
+                <span className="text-2xl font-semibold tabular-nums">{r.total}</span>
+                <span className="text-right text-xs text-stone-500">
+                  {melbourne(r.at)} · {labelFor('location', r.location)}
+                </span>
+              </span>
+              <span className="mt-1 block text-sm font-medium">
+                {r.occupation ?? 'No occupation given'}
+                {r.code && <span className="ml-1 text-xs font-normal text-stone-400">{r.code}</span>}
+              </span>
+              <span className="mt-2 flex flex-wrap gap-1.5">
+                {[
+                  `Age ${r.age}`,
+                  labelFor('english', r.english),
+                  labelFor('education', r.education),
+                  labelFor('experience', experienceBand(r.experience)),
+                  money(r.income),
+                  r.partner ? 'Partner bonus' : 'No partner bonus',
+                ].map((tag) => (
+                  <span key={tag} className="rounded-full bg-stone-100 px-2.5 py-1 text-xs text-stone-700">
+                    {tag}
+                  </span>
+                ))}
+              </span>
+            </button>
+            {isOpen && <Detail row={r} />}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+function Detail({ row: r }: { row: SubmissionRow }) {
+  return (
+    <div className="border-t border-stone-100 bg-stone-50 px-3 py-3">
+      <ul className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+        {r.breakdown.map((b) => (
+          <li key={b.key}>
+            <span className="text-stone-500">{SECTION_LABELS[b.key] ?? b.key}</span> <span className="font-medium tabular-nums">{b.points}</span>
+            <span className="text-stone-400"> / {b.max}</span>
+          </li>
+        ))}
+        <li>
+          <span className="text-stone-500">Skill level</span> <span className="font-medium">{r.skill}</span>
+        </li>
+      </ul>
+      <a className="mt-3 inline-flex min-h-11 items-center text-sm text-accent underline" href={`/r/${r.id}`} target="_blank" rel="noopener noreferrer">
+        Open the public result page
+      </a>
+    </div>
+  )
+}
+
 function RowView({ row: r, open, onToggle }: { row: SubmissionRow; open: boolean; onToggle: () => void }) {
   return (
     <>
@@ -262,21 +355,8 @@ function RowView({ row: r, open, onToggle }: { row: SubmissionRow; open: boolean
       </tr>
       {open && (
         <tr className="bg-stone-50">
-          <td colSpan={10} className="px-3 py-3">
-            <ul className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
-              {r.breakdown.map((b) => (
-                <li key={b.key}>
-                  <span className="text-stone-500">{SECTION_LABELS[b.key] ?? b.key}</span> <span className="font-medium tabular-nums">{b.points}</span>
-                  <span className="text-stone-400"> / {b.max}</span>
-                </li>
-              ))}
-              <li>
-                <span className="text-stone-500">Skill level</span> <span className="font-medium">{r.skill}</span>
-              </li>
-            </ul>
-            <a className="mt-2 inline-block text-sm text-accent underline" href={`/r/${r.id}`} target="_blank" rel="noopener noreferrer">
-              Open the public result page
-            </a>
+          <td colSpan={10} className="p-0">
+            <Detail row={r} />
           </td>
         </tr>
       )}

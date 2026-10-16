@@ -244,6 +244,65 @@ describe('submissions page', () => {
   })
 })
 
+describe('submissions page on a phone', () => {
+  beforeEach(() => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query.includes('max-width: 639px'),
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }))
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('folds the filters and sort rules away and shows the results first', async () => {
+    render(<AdminApp />)
+    await screen.findByText('1 submissions')
+    expect(screen.getByRole('button', { name: /Filters and sort/ }).getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByLabelText('Age minimum')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Add a sort rule' })).toBeNull()
+  })
+
+  it('shows each submission as a card, not a table', async () => {
+    render(<AdminApp />)
+    await screen.findByText('1 submissions')
+    expect(screen.queryByRole('table')).toBeNull()
+    expect(screen.getByText('Software Engineer')).toBeTruthy()
+    expect(screen.getByText('$95,000')).toBeTruthy()
+    expect(screen.getByText('Partner bonus')).toBeTruthy()
+  })
+
+  it('opens a card for its section points and the public result link', async () => {
+    render(<AdminApp />)
+    fireEvent.click(await screen.findByText('Software Engineer'))
+    expect(screen.getByText('Open the public result page').getAttribute('href')).toContain('/r/')
+    expect(screen.getByText('Skill level')).toBeTruthy()
+  })
+
+  it('opens the panel, applies filters and folds it away again', async () => {
+    render(<AdminApp />)
+    await screen.findByText('1 submissions')
+    fireEvent.click(screen.getByRole('button', { name: /Filters and sort/ }))
+    fireEvent.change(screen.getByLabelText('Age minimum'), { target: { value: '30' } })
+    expect(screen.getByRole('button', { name: 'Add a sort rule' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }))
+    await vi.waitFor(() => expect(lastQuery().filters).toEqual({ ageMin: 30 }))
+    expect(screen.queryByLabelText('Age minimum')).toBeNull()
+    expect(screen.getByRole('button', { name: /Filters and sort/ }).textContent).toContain('1 active')
+  })
+
+  it('keeps the typed filters while the panel is folded', async () => {
+    render(<AdminApp />)
+    await screen.findByText('1 submissions')
+    const toggle = () => screen.getByRole('button', { name: /Filters and sort/ })
+    fireEvent.click(toggle())
+    fireEvent.change(screen.getByLabelText('Age minimum'), { target: { value: '30' } })
+    fireEvent.click(toggle())
+    fireEvent.click(toggle())
+    expect((screen.getByLabelText('Age minimum') as HTMLInputElement).value).toBe('30')
+  })
+})
+
 describe('ranking simulator', () => {
   const open = async () => {
     window.history.replaceState(null, '', '/admin/simulator')
