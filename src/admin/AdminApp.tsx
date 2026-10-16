@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { clearSession, loadSession, parseHash, requestLink, saveSession, type Session } from './auth'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { clearSession, isFresh, loadSession, parseHash, renewSession, requestLink, revokeSession, saveSession, type Session } from './auth'
 import { Overview } from './Overview'
 import { Simulator } from './Simulator'
 import { Submissions } from './Submissions'
@@ -39,14 +39,26 @@ export function AdminApp() {
   // A page stays mounted once opened, so filters and results survive a switch between pages.
   const [opened, setOpened] = useState<Page[]>(() => [pageFor(window.location.pathname)])
 
+  const sessionRef = useRef<Session | null>(null)
+  const renewedAt = useRef(0)
+  const adopt = useCallback((next: Session | null) => {
+    sessionRef.current = next
+    setSession(next)
+  }, [])
+
   useEffect(() => {
     const fromLink = parseHash(window.location.hash)
     if (fromLink.session || fromLink.error) window.history.replaceState(null, '', window.location.pathname)
     if (fromLink.session) saveSession(fromLink.session)
-    setSession(fromLink.session ?? loadSession())
     if (fromLink.error) setNotice('That link is invalid or has expired. Request a new one.')
-    setChecked(true)
-  }, [])
+    const saved = fromLink.session ?? loadSession()
+    void (async () => {
+      // An out-of-date access token is renewed before anything asks the server for data.
+      const ready = saved && !isFresh(saved) ? await renewSession(saved) : saved
+      adopt(ready)
+      setChecked(true)
+    })()
+  }, [adopt])
 
   useEffect(() => {
     const onPop = () => show(pageFor(window.location.pathname))
@@ -64,17 +76,30 @@ export function AdminApp() {
     show(next)
   }
 
-  const expired = useCallback(() => {
-    clearSession()
-    setSession(null)
-    setOpened([])
-    setNotice('Your sign-in expired. Request a new link.')
-  }, [])
+  // A page got 401. The first time, try to renew quietly. A second 401 right after a renewal means the sign-in is
+  // really over, so it asks for a new link instead of looping.
+  const expired = useCallback(async () => {
+    const current = sessionRef.current
+    const justRenewed = Date.now() - renewedAt.current < 30_000
+    const next = current && !justRenewed ? await renewSession(current) : null
+    if (next) {
+      renewedAt.current = Date.now()
+      return adopt(next)
+    }
+    if (sessionRef.current === current || !sessionRef.current) {
+      clearSession()
+      adopt(null)
+      setOpened([])
+      setNotice('Your sign-in expired. Request a new link.')
+    }
+  }, [adopt])
   const signOut = () => {
+    const current = sessionRef.current
     clearSession()
-    setSession(null)
+    adopt(null)
     setOpened([])
     setNotice(undefined)
+    if (current) void revokeSession(current)
   }
   // Signing in again brings the current page back.
   useEffect(() => {
@@ -139,7 +164,7 @@ export function AdminApp() {
 
 function SignIn({ notice }: { notice?: string }) {
   const [email, setEmail] = useState('')
-  const [state, setState] = useState<'idle' | 'busy' | 'sent' | 'error'>('idle')
+  const [state, setState] = useState<'idle' | 'busy' | 'sent' | 'limited' | 'error'>('idle')
   const submit = async () => {
     if (!email.trim() || state === 'busy') return
     setState('busy')
@@ -178,6 +203,11 @@ function SignIn({ notice }: { notice?: string }) {
       {state === 'sent' && (
         <p role="status" className="mt-3 text-sm text-stone-600">
           If that address has access, a link is on its way. Open it in this browser.
+        </p>
+      )}
+      {state === 'limited' && (
+        <p role="alert" className="mt-3 text-sm text-red-700">
+          Supabase limits sign-in emails to a few an hour, and that limit is used up. Wait about an hour and try again.
         </p>
       )}
       {state === 'error' && (

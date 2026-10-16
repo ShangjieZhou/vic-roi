@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AdminApp } from './AdminApp'
-import { clearSession, loadSession, parseHash, requestLink, saveSession } from './auth'
+import { MAX_SESSION_MS, clearSession, isFresh, loadSession, parseHash, renewSession, requestLink, revokeSession, saveSession } from './auth'
 import { labelFor, orderRows, percent } from './labels'
 import * as types from './types'
 import type { AdminStats } from './types'
@@ -34,7 +34,7 @@ const stats: AdminStats = {
 }
 
 beforeEach(() => {
-  sessionStorage.clear()
+  localStorage.clear()
   window.history.replaceState(null, '', '/admin')
   vi.stubEnv('VITE_SUPABASE_URL', 'https://example.supabase.co')
   vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key')
@@ -52,7 +52,7 @@ afterEach(() => {
 describe('parseHash', () => {
   it('reads the token and its lifetime from the email link', () => {
     const { session } = parseHash('#access_token=abc&expires_in=600&type=magiclink', 1000)
-    expect(session).toEqual({ token: 'abc', expiresAt: 1000 + 600_000 })
+    expect(session).toMatchObject({ token: 'abc', expiresAt: 1000 + 600_000 })
   })
   it('reports an expired link', () => {
     expect(parseHash('#error=access_denied&error_description=Email+link+is+invalid+or+has+expired').error).toContain('expired')
@@ -63,15 +63,95 @@ describe('parseHash', () => {
 })
 
 describe('session', () => {
-  it('survives a reload of the same tab until it expires', () => {
+  it('keeps the access token and the renewal token from the email link', () => {
+    const { session } = parseHash('#access_token=abc&refresh_token=ref&expires_in=600', 1000)
+    expect(session).toEqual({ token: 'abc', expiresAt: 601_000, refreshToken: 'ref', startedAt: 1000 })
+  })
+  it('survives a restart of the browser', () => {
+    saveSession({ token: 't', expiresAt: Date.now() + 600_000, refreshToken: 'r' })
+    expect(localStorage.getItem('vpt-admin-session')).toContain('"token":"t"')
+    expect(loadSession()?.token).toBe('t')
+  })
+  it('is dropped when it has expired and cannot be renewed', () => {
     saveSession({ token: 't', expiresAt: 5000 })
-    expect(loadSession(4000)?.token).toBe('t')
-    expect(loadSession(5000)).toBeNull()
+    expect(loadSession(10_000)).toBeNull()
+  })
+  it('is kept when expired but renewable', () => {
+    saveSession({ token: 't', expiresAt: 5000, refreshToken: 'r' })
+    expect(loadSession(10_000)?.refreshToken).toBe('r')
+    expect(isFresh({ token: 't', expiresAt: 5000 }, 10_000)).toBe(false)
+  })
+  it('treats a token about to end as out of date', () => {
+    expect(isFresh({ token: 't', expiresAt: 100_000 }, 50_000)).toBe(false)
+    expect(isFresh({ token: 't', expiresAt: 200_000 }, 50_000)).toBe(true)
+  })
+  it('ends 30 days after the email link, however often it was renewed', () => {
+    const start = 1_000_000
+    saveSession({ token: 't', expiresAt: start + MAX_SESSION_MS + 1e9, refreshToken: 'r', startedAt: start })
+    expect(loadSession(start + MAX_SESSION_MS - 1)).not.toBeNull()
+    expect(loadSession(start + MAX_SESSION_MS + 1)).toBeNull()
   })
   it('is gone after signing out', () => {
     saveSession({ token: 't', expiresAt: Date.now() + 10_000 })
     clearSession()
     expect(loadSession()).toBeNull()
+  })
+})
+
+describe('renewSession', () => {
+  const startedAt = Date.now() - 1000
+  const old = { token: 'old', expiresAt: 1, refreshToken: 'ref1', startedAt }
+  const reply = (status: number, body: unknown = {}) => {
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify(body), { status }))
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  it('trades the renewal token for a new pair and keeps the original start time', async () => {
+    const fetchMock = reply(200, { access_token: 'new', refresh_token: 'ref2', expires_in: 3600 })
+    const next = await renewSession(old)
+    expect(next).toMatchObject({ token: 'new', refreshToken: 'ref2', startedAt })
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('https://example.supabase.co/auth/v1/token?grant_type=refresh_token')
+    expect(JSON.parse(init.body)).toEqual({ refresh_token: 'ref1' })
+    expect(loadSession()?.refreshToken).toBe('ref2')
+  })
+
+  it('sends one request for renewals made together', async () => {
+    const fetchMock = reply(200, { access_token: 'new', refresh_token: 'ref2', expires_in: 3600 })
+    const [a, b] = await Promise.all([renewSession(old), renewSession(old)])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(a).toEqual(b)
+  })
+
+  it('removes the sign-in when Supabase refuses the renewal token', async () => {
+    saveSession(old)
+    reply(400, { error: 'invalid_grant' })
+    expect(await renewSession(old)).toBeNull()
+    expect(localStorage.getItem('vpt-admin-session')).toBeNull()
+  })
+
+  it('keeps the sign-in through a server error or a network failure', async () => {
+    saveSession(old)
+    reply(500)
+    expect(await renewSession(old)).toBeNull()
+    expect(localStorage.getItem('vpt-admin-session')).not.toBeNull()
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+    expect(await renewSession(old)).toBeNull()
+  })
+
+  it('has nothing to renew without a renewal token', async () => {
+    const fetchMock = reply(200)
+    expect(await renewSession({ token: 't', expiresAt: 1 })).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('ends the session on the server when signing out', async () => {
+    const fetchMock = reply(204)
+    await revokeSession({ token: 'tok', expiresAt: 1, refreshToken: 'r' })
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('https://example.supabase.co/auth/v1/logout')
+    expect(init.headers.Authorization).toBe('Bearer tok')
   })
 })
 
@@ -93,9 +173,11 @@ describe('requestLink', () => {
     stub(422)
     expect(await requestLink('other@example.com')).toBe('sent')
   })
-  it('reports rate limits, server errors and network failures', async () => {
+  it('reports the email rate limit on its own', async () => {
     stub(429)
-    expect(await requestLink('a@b.co')).toBe('error')
+    expect(await requestLink('a@b.co')).toBe('limited')
+  })
+  it('reports server errors and network failures', async () => {
     stub(500)
     expect(await requestLink('a@b.co')).toBe('error')
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
@@ -121,7 +203,7 @@ describe('labels', () => {
 
 describe('submissions over time', () => {
   const open = async () => {
-    saveSession({ token: 'tok', expiresAt: Date.now() + 60_000 })
+    saveSession({ token: 'tok', expiresAt: Date.now() + 600_000 })
     vi.mocked(types.loadStats).mockResolvedValue({ status: 'ok', stats })
     render(<AdminApp />)
     await screen.findByText('Submissions over time')
@@ -177,15 +259,54 @@ describe('AdminApp', () => {
   })
 
   it('keeps showing the data after a reload in the same tab', async () => {
-    saveSession({ token: 'kept', expiresAt: Date.now() + 60_000 })
+    saveSession({ token: 'kept', expiresAt: Date.now() + 600_000 })
     vi.mocked(types.loadStats).mockResolvedValue({ status: 'ok', stats })
     render(<AdminApp />)
     await screen.findByText('Score distribution')
     expect(types.loadStats).toHaveBeenCalledWith('kept')
   })
 
+  it('renews an out-of-date token before asking for data', async () => {
+    saveSession({ token: 'stale', expiresAt: Date.now() - 1000, refreshToken: 'ref' })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ access_token: 'fresh', refresh_token: 'ref2', expires_in: 3600 }), { status: 200 })))
+    vi.mocked(types.loadStats).mockResolvedValue({ status: 'ok', stats })
+    render(<AdminApp />)
+    await screen.findByText('Score distribution')
+    expect(types.loadStats).toHaveBeenCalledTimes(1)
+    expect(types.loadStats).toHaveBeenCalledWith('fresh')
+  })
+
+  it('renews quietly when the server rejects the token, then loads again', async () => {
+    saveSession({ token: 'old', expiresAt: Date.now() + 600_000, refreshToken: 'ref' })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ access_token: 'fresh', refresh_token: 'ref2', expires_in: 3600 }), { status: 200 })))
+    vi.mocked(types.loadStats).mockImplementation(async (token) => (token === 'old' ? { status: 'signed_out' } : { status: 'ok', stats }))
+    render(<AdminApp />)
+    await screen.findByText('Score distribution')
+    expect(types.loadStats).toHaveBeenLastCalledWith('fresh')
+    expect(screen.queryByText(/sign-in expired/)).toBeNull()
+  })
+
+  it('asks for a new link when the renewal fails', async () => {
+    saveSession({ token: 'old', expiresAt: Date.now() + 600_000, refreshToken: 'ref' })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 400 })))
+    vi.mocked(types.loadStats).mockResolvedValue({ status: 'signed_out' })
+    render(<AdminApp />)
+    expect(await screen.findByText(/sign-in expired/)).toBeTruthy()
+    expect(loadSession()).toBeNull()
+  })
+
+  it('does not loop when a freshly renewed token is also rejected', async () => {
+    saveSession({ token: 'old', expiresAt: Date.now() + 600_000, refreshToken: 'ref' })
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ access_token: 'fresh', refresh_token: 'ref2', expires_in: 3600 }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.mocked(types.loadStats).mockResolvedValue({ status: 'signed_out' })
+    render(<AdminApp />)
+    expect(await screen.findByText(/sign-in expired/)).toBeTruthy()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('refuses a signed-in account that is not the admin', async () => {
-    saveSession({ token: 'x', expiresAt: Date.now() + 60_000 })
+    saveSession({ token: 'x', expiresAt: Date.now() + 600_000 })
     vi.mocked(types.loadStats).mockResolvedValue({ status: 'forbidden' })
     render(<AdminApp />)
     expect((await screen.findByRole('alert')).textContent).toContain('does not have access')
@@ -193,7 +314,7 @@ describe('AdminApp', () => {
   })
 
   it('returns to sign-in when the token has expired', async () => {
-    saveSession({ token: 'x', expiresAt: Date.now() + 60_000 })
+    saveSession({ token: 'x', expiresAt: Date.now() + 600_000 })
     vi.mocked(types.loadStats).mockResolvedValue({ status: 'signed_out' })
     render(<AdminApp />)
     expect(await screen.findByText(/sign-in expired/)).toBeTruthy()
@@ -201,12 +322,15 @@ describe('AdminApp', () => {
   })
 
   it('signs out', async () => {
-    saveSession({ token: 'x', expiresAt: Date.now() + 60_000 })
+    saveSession({ token: 'x', expiresAt: Date.now() + 600_000 })
     vi.mocked(types.loadStats).mockResolvedValue({ status: 'ok', stats })
     render(<AdminApp />)
     await screen.findByText('Score distribution')
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }))
     expect(screen.getByRole('button', { name: 'Email me a link' })).toBeTruthy()
+    expect(fetchMock.mock.calls[0][0]).toContain('/auth/v1/logout')
     expect(loadSession()).toBeNull()
     await waitFor(() => expect(screen.queryByText('Score distribution')).toBeNull())
   })

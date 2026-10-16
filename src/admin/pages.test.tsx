@@ -42,7 +42,7 @@ const ranked: Insights = {
 }
 
 beforeEach(() => {
-  sessionStorage.clear()
+  localStorage.clear()
   window.history.replaceState(null, '', '/admin/submissions')
   saveSession({ token: 'tok', expiresAt: Date.now() + 600_000 })
   vi.stubEnv('VITE_SUPABASE_URL', 'https://example.supabase.co')
@@ -129,7 +129,7 @@ describe('navigation', () => {
   })
 
   it('shows nothing from any page until signed in', () => {
-    sessionStorage.clear()
+    localStorage.clear()
     render(<AdminApp />)
     expect(screen.getByRole('button', { name: 'Email me a link' })).toBeTruthy()
     expect(screen.queryByRole('navigation')).toBeNull()
