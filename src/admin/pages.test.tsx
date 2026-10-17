@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Insights } from '../../supabase/functions/_shared/insights'
+import { calculateVpt } from '../../supabase/functions/_shared/scoring'
 import { AdminApp, pageFor } from './AdminApp'
 import { saveSession } from './auth'
 import { barLabel } from './Overview'
@@ -17,6 +18,8 @@ vi.mock('./types', async (original) => ({
   loadTimeline: vi.fn(),
   loadSubmissions: vi.fn(),
   simulateRanking: vi.fn(),
+  updateSubmission: vi.fn(),
+  deleteSubmission: vi.fn(),
 }))
 // The occupation list search is heavy and not under test here.
 vi.mock('../OccupationPicker', () => ({
@@ -50,6 +53,8 @@ beforeEach(() => {
   vi.mocked(types.loadTimeline).mockReset().mockResolvedValue({ status: 'error' })
   vi.mocked(types.loadSubmissions).mockReset().mockResolvedValue({ status: 'ok', data: { total: 1, rows: [row()] } })
   vi.mocked(types.simulateRanking).mockReset()
+  vi.mocked(types.updateSubmission).mockReset().mockResolvedValue({ status: 'ok', data: undefined })
+  vi.mocked(types.deleteSubmission).mockReset().mockResolvedValue({ status: 'ok', data: undefined })
 })
 afterEach(() => {
   cleanup()
@@ -241,6 +246,166 @@ describe('submissions page', () => {
     vi.mocked(types.loadSubmissions).mockResolvedValue({ status: 'forbidden' })
     render(<AdminApp />)
     expect((await screen.findByRole('alert')).textContent).toContain('does not have access')
+  })
+})
+
+describe('deleting a submission', () => {
+  const openRow = async () => {
+    render(<AdminApp />)
+    fireEvent.click(await screen.findByText('Software Engineer'))
+  }
+
+  it('asks first, and does nothing if cancelled', async () => {
+    await openRow()
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    expect(screen.getByRole('alertdialog').textContent).toContain('This cannot be undone')
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(types.deleteSubmission).not.toHaveBeenCalled()
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+  })
+
+  it('deletes after confirmation and reloads the list', async () => {
+    await openRow()
+    const loads = vi.mocked(types.loadSubmissions).mock.calls.length
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete permanently' }))
+    await vi.waitFor(() => expect(types.deleteSubmission).toHaveBeenCalledWith('tok', '2ceb142f-cccc-4081-834a-133f83343775'))
+    await vi.waitFor(() => expect(vi.mocked(types.loadSubmissions).mock.calls.length).toBe(loads + 1))
+  })
+
+  it('reloads when the row was already gone', async () => {
+    vi.mocked(types.deleteSubmission).mockResolvedValue({ status: 'not_found' })
+    await openRow()
+    const loads = vi.mocked(types.loadSubmissions).mock.calls.length
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete permanently' }))
+    await vi.waitFor(() => expect(vi.mocked(types.loadSubmissions).mock.calls.length).toBe(loads + 1))
+  })
+
+  it('reports a failure and keeps the confirmation open', async () => {
+    vi.mocked(types.deleteSubmission).mockResolvedValue({ status: 'error' })
+    await openRow()
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete permanently' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('Could not load')
+  })
+
+  it('returns to sign-in when the session expired', async () => {
+    vi.mocked(types.deleteSubmission).mockResolvedValue({ status: 'signed_out' })
+    await openRow()
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete permanently' }))
+    expect(await screen.findByText(/sign-in expired/)).toBeTruthy()
+  })
+})
+
+describe('editing a submission', () => {
+  const openEditor = async () => {
+    render(<AdminApp />)
+    fireEvent.click(await screen.findByText('Software Engineer'))
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    return within(screen.getByRole('dialog'))
+  }
+  const savedPayload = () => vi.mocked(types.updateSubmission).mock.calls[0]
+
+  it('opens with the saved answers', async () => {
+    const dialog = await openEditor()
+    expect((dialog.getByLabelText('Age') as HTMLInputElement).value).toBe('31')
+    expect((dialog.getByLabelText('English level') as HTMLSelectElement).value).toBe('superior')
+    expect((dialog.getByLabelText('Education') as HTMLSelectElement).value).toBe('masters')
+    expect((dialog.getByLabelText('Experience') as HTMLSelectElement).value).toBe('4')
+    expect((dialog.getByLabelText('Partner bonus') as HTMLSelectElement).value).toBe('yes')
+    expect((dialog.getByLabelText('Annual earnings (AUD)') as HTMLInputElement).value).toBe('95000')
+    expect(dialog.getByText(/Software Engineer \(261313\)/)).toBeTruthy()
+  })
+
+  it('shows the new score as the answers change', async () => {
+    const real = calculateVpt({
+      location: 'onshore', age: 31, english: 'superior', experienceYears: 5, education: 'masters',
+      skillLevel: 1, partnerQualifies: true, annualEarnings: 95000,
+    }).total
+    vi.mocked(types.loadSubmissions).mockResolvedValue({ status: 'ok', data: { total: 1, rows: [row({ total: real })] } })
+    const dialog = await openEditor()
+    expect(dialog.queryByText(/becomes/)).toBeNull()
+    fireEvent.change(dialog.getByLabelText('English level'), { target: { value: 'competent' } })
+    expect(dialog.getByText(/becomes/).textContent).toContain(String(real - 200))
+  })
+
+  it('saves the changed answers, keeping the occupation and the saved years of experience', async () => {
+    const dialog = await openEditor()
+    fireEvent.change(dialog.getByLabelText('Age'), { target: { value: '33' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Save changes' }))
+    await vi.waitFor(() => expect(types.updateSubmission).toHaveBeenCalled())
+    const [token, id, input, occupation] = savedPayload()
+    expect(token).toBe('tok')
+    expect(id).toBe('2ceb142f-cccc-4081-834a-133f83343775')
+    // The row stored 5 years, which sits in the 4 to 5 band. Leaving the band alone keeps the 5.
+    expect(input).toEqual({
+      location: 'onshore', age: 33, english: 'superior', experienceYears: 5, education: 'masters',
+      skillLevel: 1, partnerQualifies: true, annualEarnings: 95000,
+    })
+    expect(occupation).toBeUndefined()
+  })
+
+  it('stores the band code when the band is changed', async () => {
+    const dialog = await openEditor()
+    fireEvent.change(dialog.getByLabelText('Experience'), { target: { value: '9' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Save changes' }))
+    await vi.waitFor(() => expect(types.updateSubmission).toHaveBeenCalled())
+    expect(savedPayload()[2]).toMatchObject({ experienceYears: 9 })
+  })
+
+  it('removes the occupation, and can undo that', async () => {
+    const dialog = await openEditor()
+    fireEvent.click(dialog.getByRole('button', { name: 'Remove' }))
+    expect(dialog.getByText('The occupation will be removed.')).toBeTruthy()
+    fireEvent.click(dialog.getByRole('button', { name: 'Undo' }))
+    expect(dialog.getByText(/Software Engineer \(261313\)/)).toBeTruthy()
+    fireEvent.click(dialog.getByRole('button', { name: 'Remove' }))
+    fireEvent.click(dialog.getByRole('button', { name: 'Save changes' }))
+    await vi.waitFor(() => expect(types.updateSubmission).toHaveBeenCalled())
+    expect(savedPayload()[3]).toBeNull()
+  })
+
+  it('changes the occupation to a listed one', async () => {
+    const dialog = await openEditor()
+    fireEvent.click(dialog.getByRole('button', { name: 'Change' }))
+    fireEvent.click(dialog.getByText('pick occupation'))
+    fireEvent.click(dialog.getByRole('button', { name: 'Save changes' }))
+    await vi.waitFor(() => expect(types.updateSubmission).toHaveBeenCalled())
+    expect(savedPayload()[3]).toBe('261313')
+  })
+
+  it('closes and reloads the list after saving', async () => {
+    const dialog = await openEditor()
+    const loads = vi.mocked(types.loadSubmissions).mock.calls.length
+    fireEvent.click(dialog.getByRole('button', { name: 'Save changes' }))
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await vi.waitFor(() => expect(vi.mocked(types.loadSubmissions).mock.calls.length).toBe(loads + 1))
+  })
+
+  it('will not save answers that are out of range', async () => {
+    const dialog = await openEditor()
+    fireEvent.change(dialog.getByLabelText('Age'), { target: { value: '200' } })
+    expect(dialog.getByText('Check the answers.')).toBeTruthy()
+    expect((dialog.getByRole('button', { name: 'Save changes' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(types.updateSubmission).not.toHaveBeenCalled()
+  })
+
+  it('shows the server rejecting impossible answers, and keeps the form open', async () => {
+    vi.mocked(types.updateSubmission).mockResolvedValue({ status: 'implausible' })
+    const dialog = await openEditor()
+    fireEvent.change(dialog.getByLabelText('Age'), { target: { value: '19' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Save changes' }))
+    expect((await dialog.findByRole('alert')).textContent).toContain('do not look possible')
+    expect(screen.getByRole('dialog')).toBeTruthy()
+  })
+
+  it('cancels without saving', async () => {
+    const dialog = await openEditor()
+    fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(types.updateSubmission).not.toHaveBeenCalled()
   })
 })
 

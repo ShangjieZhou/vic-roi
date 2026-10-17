@@ -1,41 +1,22 @@
 import { useState } from 'react'
 import type { Insights } from '../../supabase/functions/_shared/insights'
-import { calculateVpt, parseVptInput, type VptResult } from '../../supabase/functions/_shared/scoring'
+import { calculateVpt, type VptResult } from '../../supabase/functions/_shared/scoring'
 import type { OccupationChoice } from '../api'
 import { useI18n } from '../i18n'
 import { OccupationPicker } from '../OccupationPicker'
 import { AnalysisView } from '../Results'
 import { isRanked } from '../../supabase/functions/_shared/insights'
-import { labelFor } from './labels'
+import { AnswerFields, CHOICES, Field, Select, defaultAnswers, inputFrom, type Answers } from './AnswerFields'
 import { simulateRanking, type SimulateRequest } from './types'
 import { BTN, CARD, INPUT, Problem, TITLE } from './ui'
 
 type Mode = 'score' | 'form'
 
-const SELECTS = {
-  english: ['competent', 'proficient', 'superior'],
-  experience: ['0', '1', '2', '4', '6', '9'],
-  education: ['other', 'bachelors', 'masters', 'phd'],
-  skill: ['1', '2', '3'],
-  location: ['onshore', 'offshore'],
-} as const
-
-interface FormState {
+interface FormState extends Answers {
   score: string
-  location: string
-  age: string
-  english: string
-  experience: string
-  education: string
-  skill: string
-  partner: string
-  earnings: string
 }
 
-const start: FormState = {
-  score: '', location: 'onshore', age: '30', english: 'proficient', experience: '4',
-  education: 'bachelors', skill: '1', partner: 'no', earnings: '0',
-}
+const start: FormState = { ...defaultAnswers, score: '' }
 
 // The third page: where a score would land among the stored submissions, shown with the same analysis the
 // candidates see. Nothing is saved.
@@ -64,16 +45,7 @@ export function Simulator(props: { token: string; onExpired: () => void }) {
       }
       request = { mode: 'score', total, location: form.location as 'onshore' | 'offshore', occupationCode }
     } else {
-      const input = parseVptInput({
-        location: form.location,
-        age: Number(form.age),
-        english: form.english,
-        experienceYears: Number(form.experience),
-        education: form.education,
-        skillLevel: Number(form.skill),
-        partnerQualifies: form.partner === 'yes',
-        annualEarnings: Number(form.earnings || 0),
-      })
+      const input = inputFrom(form)
       if (!input) return setError('Check the answers: age and earnings must be whole numbers in range.')
       result = calculateVpt(input)
       total = result.total
@@ -118,24 +90,12 @@ export function Simulator(props: { token: string; onExpired: () => void }) {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {mode === 'score' ? (
             <Field label="Total score (0 to 950)">
-              <input id="sim-score" inputMode="numeric" className={INPUT} value={form.score} onChange={(e) => patch({ score: e.target.value })} placeholder="For example 640" />
+              <input aria-label="Total score" inputMode="numeric" className={INPUT} value={form.score} onChange={(e) => patch({ score: e.target.value })} placeholder="For example 640" />
             </Field>
           ) : (
-            <>
-              <Field label="Age">
-                <input id="sim-age" inputMode="numeric" className={INPUT} value={form.age} onChange={(e) => patch({ age: e.target.value })} />
-              </Field>
-              <Select id="sim-english" label="English level" value={form.english} values={SELECTS.english} dimension="english" onChange={(v) => patch({ english: v })} />
-              <Select id="sim-experience" label="Experience" value={form.experience} values={SELECTS.experience} dimension="experience" onChange={(v) => patch({ experience: v })} />
-              <Select id="sim-education" label="Education" value={form.education} values={SELECTS.education} dimension="education" onChange={(v) => patch({ education: v })} />
-              <Select id="sim-skill" label="Occupation skill level" value={form.skill} values={SELECTS.skill} dimension="skill" onChange={(v) => patch({ skill: v })} />
-              <Select id="sim-partner" label="Partner bonus" value={form.partner} values={['yes', 'no']} dimension="partner" onChange={(v) => patch({ partner: v })} />
-              <Field label="Annual earnings (AUD)">
-                <input id="sim-earnings" inputMode="numeric" className={INPUT} value={form.earnings} onChange={(e) => patch({ earnings: e.target.value })} />
-              </Field>
-            </>
+            <AnswerFields answers={form} patch={patch} />
           )}
-          <Select id="sim-location" label="Location" value={form.location} values={SELECTS.location} dimension="location" onChange={(v) => patch({ location: v })} />
+          <Select label="Location" value={form.location} values={CHOICES.location} dimension="location" onChange={(v) => patch({ location: v })} />
         </div>
 
         <div className="mt-4">
@@ -186,32 +146,6 @@ export function Simulator(props: { token: string; onExpired: () => void }) {
           )}
         </section>
       )}
-    </div>
-  )
-}
-
-function Field(props: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="text-sm font-medium">{props.label}</span>
-      <div className="mt-1">{props.children}</div>
-    </label>
-  )
-}
-
-function Select(props: { id: string; label: string; value: string; values: readonly string[]; dimension: string; onChange: (v: string) => void }) {
-  return (
-    <div>
-      <label htmlFor={props.id} className="text-sm font-medium">
-        {props.label}
-      </label>
-      <select id={props.id} className={`${INPUT} mt-1`} value={props.value} onChange={(e) => props.onChange(e.target.value)}>
-        {props.values.map((v) => (
-          <option key={v} value={v}>
-            {labelFor(props.dimension, v)}
-          </option>
-        ))}
-      </select>
     </div>
   )
 }

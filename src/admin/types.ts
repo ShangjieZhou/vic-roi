@@ -51,7 +51,9 @@ export interface SubmissionPage {
   rows: SubmissionRow[]
 }
 
-export type AdminResult<T> = { status: 'ok'; data: T } | { status: 'signed_out' | 'forbidden' | 'unconfigured' | 'bad_request' | 'error' }
+export type AdminResult<T> =
+  | { status: 'ok'; data: T }
+  | { status: 'signed_out' | 'forbidden' | 'unconfigured' | 'bad_request' | 'implausible' | 'not_found' | 'error' }
 
 // One call to the admin function. It checks the sign-in token and the admin email on every request.
 export async function adminRequest<T>(token: string, body?: Record<string, unknown>): Promise<AdminResult<T>> {
@@ -71,6 +73,9 @@ export async function adminRequest<T>(token: string, body?: Record<string, unkno
     if (res.status === 403) return { status: 'forbidden' }
     if (res.status === 503) return { status: 'unconfigured' }
     if (res.status === 400) return { status: 'bad_request' }
+    if (res.status === 404) return { status: 'not_found' }
+    if (res.status === 422) return { status: 'implausible' }
+    if (res.status === 204) return { status: 'ok', data: undefined as T }
     if (!res.ok) return { status: 'error' }
     return { status: 'ok', data: (await res.json()) as T }
   } catch {
@@ -113,3 +118,10 @@ export interface Timeline {
 }
 
 export const loadTimeline = (token: string, range: TimelineRange) => adminRequest<Timeline>(token, { action: 'timeline', range })
+
+// An edit replaces the answers, and the server scores them again. occupationCode left out keeps the occupation,
+// null removes it, and a listed code changes it.
+export const updateSubmission = (token: string, id: string, input: Record<string, unknown>, occupationCode?: string | null) =>
+  adminRequest<void>(token, { action: 'update', id, input, ...(occupationCode !== undefined ? { occupationCode } : {}) })
+
+export const deleteSubmission = (token: string, id: string) => adminRequest<void>(token, { action: 'delete', id })

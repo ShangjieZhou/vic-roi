@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { loadStats } from './types'
+import { deleteSubmission, loadStats, updateSubmission } from './types'
 
 const fetchMock = vi.fn()
 beforeEach(() => {
@@ -36,5 +36,34 @@ describe('loadStats', () => {
   it('reports a network failure', async () => {
     fetchMock.mockRejectedValue(new Error('offline'))
     expect((await loadStats('t')).status).toBe('error')
+  })
+})
+
+describe('editing and deleting', () => {
+  it('sends an update, leaving the occupation out unless it is given', async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }))
+    expect((await updateSubmission('tok', 'id1', { age: 30 })).status).toBe('ok')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ action: 'update', id: 'id1', input: { age: 30 } })
+    await updateSubmission('tok', 'id1', { age: 30 }, null)
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).occupationCode).toBeNull()
+    await updateSubmission('tok', 'id1', { age: 30 }, '261313')
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body).occupationCode).toBe('261313')
+  })
+
+  it('sends a delete', async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }))
+    expect((await deleteSubmission('tok', 'id1')).status).toBe('ok')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ action: 'delete', id: 'id1' })
+  })
+
+  it.each([
+    [404, 'not_found'],
+    [422, 'implausible'],
+    [400, 'bad_request'],
+    [401, 'signed_out'],
+    [500, 'error'],
+  ])('maps %i to %s', async (code, status) => {
+    fetchMock.mockResolvedValue(new Response('{}', { status: code }))
+    expect((await deleteSubmission('t', 'id1')).status).toBe(status)
   })
 })

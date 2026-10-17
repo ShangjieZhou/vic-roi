@@ -3,6 +3,11 @@
 //     { action: 'stats' }                                                   -> the overview numbers (admin_stats)
 //     { action: 'submissions', filters, sort, limit, offset }               -> { total, rows } (admin_submissions)
 //     { action: 'timeline', range: '1h' | '24h' | '7d' | '30d' }          -> submissions per time bucket (admin_timeline)
+//     { action: 'delete', id }                                              -> 204, or 404 not_found
+//     { action: 'update', id, input, occupationCode? }                      -> 204, or 404 not_found, 422 implausible_input.
+//                                                                              The score is recomputed here. occupationCode
+//                                                                              is left out to keep the occupation, null to
+//                                                                              clear it, or a listed code to change it.
 //     { action: 'simulate', mode: 'score', total, location, occupationCode? } or
 //     { action: 'simulate', mode: 'form', input, occupationCode? }          -> { insights } for a candidate who is
 //                                                                              not stored (compute_insights)
@@ -13,8 +18,8 @@
 // numbers never reach any other caller.
 
 import { createClient } from 'npm:@supabase/supabase-js@2'
-import { OCCUPATION_BY_CODE } from '../_shared/occupations.ts'
-import { calculateVpt, parseVptInput } from '../_shared/scoring.ts'
+import { OCCUPATION_BY_CODE, occupationGroup } from '../_shared/occupations.ts'
+import { calculateVpt, parseVptInput, plausibilityIssue } from '../_shared/scoring.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_ORIGIN') ?? '*',
@@ -64,6 +69,16 @@ Deno.serve(async (req) => {
     return json(page, 200)
   }
 
+  if (body.action === 'delete') {
+    if (!isUuid(body.id)) return json({ error: 'invalid_request' }, 400)
+    const { data: deleted, error: deleteError } = await db.rpc('admin_delete_submission', { p_id: body.id })
+    if (deleteError) return json({ error: 'load_failed' }, 500)
+    if (!deleted) return json({ error: 'not_found' }, 404)
+    return new Response(null, { status: 204, headers: cors })
+  }
+
+  if (body.action === 'update') return update(body)
+
   if (body.action === 'timeline') {
     if (typeof body.range !== 'string') return json({ error: 'invalid_request' }, 400)
     const { data: timeline, error: timelineError } = await db.rpc('admin_timeline', { p_range: body.range })
@@ -78,6 +93,47 @@ Deno.serve(async (req) => {
   if (statsError) return json({ error: 'load_failed' }, 500)
   return json(stats, 200)
 })
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const isUuid = (v: unknown): v is string => typeof v === 'string' && UUID.test(v)
+
+// Replaces a submission's answers. The score and breakdown are recomputed here, the same way a new submission is
+// scored, and the new answers must pass the same checks, so an edit cannot put an impossible entry in the pool.
+async function update(body: Record<string, unknown>): Promise<Response> {
+  if (!isUuid(body.id)) return json({ error: 'invalid_request' }, 400)
+  const input = parseVptInput(body.input)
+  if (!input) return json({ error: 'invalid_request' }, 400)
+  const implausible = plausibilityIssue(input)
+  if (implausible) return json({ error: 'implausible_input', reason: implausible }, 422)
+
+  let occupation = { set: false, title: null as string | null, key: null as string | null, code: null as string | null, group: null as string | null }
+  if ('occupationCode' in body) {
+    if (body.occupationCode === null) {
+      occupation = { ...occupation, set: true }
+    } else {
+      const listed = typeof body.occupationCode === 'string' ? OCCUPATION_BY_CODE.get(body.occupationCode) : undefined
+      if (!listed) return json({ error: 'invalid_request' }, 400)
+      occupation = { set: true, title: listed.title, key: listed.code, code: listed.code, group: occupationGroup(listed.code) }
+    }
+  }
+
+  const result = calculateVpt(input)
+  const { data: updated, error } = await db.rpc('admin_update_submission', {
+    p_id: body.id,
+    p_input: input,
+    p_total: result.total,
+    p_breakdown: result.categories,
+    p_location: input.location,
+    p_set_occupation: occupation.set,
+    p_occupation: occupation.title,
+    p_occupation_key: occupation.key,
+    p_occupation_code: occupation.code,
+    p_occupation_group: occupation.group,
+  })
+  if (error) return json({ error: 'load_failed' }, 500)
+  if (!updated) return json({ error: 'not_found' }, 404)
+  return new Response(null, { status: 204, headers: cors })
+}
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 

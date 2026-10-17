@@ -6,6 +6,7 @@ import {
 } from './submissionQuery'
 import { loadSubmissions, type SubmissionPage, type SubmissionRow } from './types'
 import { ChevronIcon } from '../icons'
+import { RowActions } from './RowActions'
 import { BTN, CARD, INPUT, Problem, SELECT, TITLE, useCompact } from './ui'
 
 const PAGE_SIZE = 50
@@ -63,6 +64,7 @@ export function Submissions(props: { token: string; onExpired: () => void }) {
   }
   const patch = (p: Partial<FilterForm>) => setForm((f) => ({ ...f, ...p }))
 
+  const actions = { token, onExpired, onChanged: load }
   const total = page?.total ?? 0
   const from = total === 0 ? 0 : offset + 1
   const to = Math.min(offset + PAGE_SIZE, total)
@@ -160,7 +162,7 @@ export function Submissions(props: { token: string; onExpired: () => void }) {
           <p className="text-xs text-stone-500">{describeSort(sort)}</p>
         </div>
         {page && page.rows.length === 0 && <p className="mt-4 text-sm text-stone-500">No submissions match these filters.</p>}
-        {page && page.rows.length > 0 && (compact ? <CardList rows={page.rows} /> : <Table rows={page.rows} />)}
+        {page && page.rows.length > 0 && (compact ? <CardList rows={page.rows} actions={actions} /> : <Table rows={page.rows} actions={actions} />)}
         <div className="mt-4 flex items-center justify-between gap-3 text-sm">
           <span className="text-stone-500">{page ? `${from.toLocaleString()} to ${to.toLocaleString()} of ${total.toLocaleString()}` : busy ? 'Loading...' : ''}</span>
           <div className="flex gap-2">
@@ -249,7 +251,7 @@ function SortBuilder(props: { rules: SortRule[]; onChange: (rules: SortRule[]) =
   )
 }
 
-function Table({ rows }: { rows: SubmissionRow[] }) {
+function Table({ rows, actions }: { rows: SubmissionRow[]; actions: Actions }) {
   const [open, setOpen] = useState<string | null>(null)
   const heads = ['Submitted', 'Score', 'Age', 'English', 'Education', 'Experience', 'Income', 'Partner', 'Location', 'Occupation']
   return (
@@ -266,7 +268,7 @@ function Table({ rows }: { rows: SubmissionRow[] }) {
         </thead>
         <tbody>
           {rows.map((r) => (
-            <RowView key={r.id} row={r} open={open === r.id} onToggle={() => setOpen(open === r.id ? null : r.id)} />
+            <RowView key={r.id} row={r} actions={actions} open={open === r.id} onToggle={() => setOpen(open === r.id ? null : r.id)} />
           ))}
         </tbody>
       </table>
@@ -275,7 +277,7 @@ function Table({ rows }: { rows: SubmissionRow[] }) {
 }
 
 // The phone layout: one card per submission, tapped open for the section points.
-function CardList({ rows }: { rows: SubmissionRow[] }) {
+function CardList({ rows, actions }: { rows: SubmissionRow[]; actions: Actions }) {
   const [open, setOpen] = useState<string | null>(null)
   return (
     <ul className="mt-4 grid gap-2">
@@ -309,7 +311,7 @@ function CardList({ rows }: { rows: SubmissionRow[] }) {
                 ))}
               </span>
             </button>
-            {isOpen && <Detail row={r} />}
+            {isOpen && <Detail row={r} actions={actions} />}
           </li>
         )
       })}
@@ -317,7 +319,9 @@ function CardList({ rows }: { rows: SubmissionRow[] }) {
   )
 }
 
-function Detail({ row: r }: { row: SubmissionRow }) {
+type Actions = { token: string; onExpired: () => void; onChanged: () => void }
+
+function Detail({ row: r, actions }: { row: SubmissionRow; actions: Actions }) {
   return (
     <div className="border-t border-stone-100 bg-stone-50 px-3 py-3">
       <ul className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
@@ -334,11 +338,12 @@ function Detail({ row: r }: { row: SubmissionRow }) {
       <a className="mt-3 inline-flex min-h-11 items-center text-sm text-accent underline" href={`/r/${r.id}`} target="_blank" rel="noopener noreferrer">
         Open the public result page
       </a>
+      <RowActions row={r} {...actions} />
     </div>
   )
 }
 
-function RowView({ row: r, open, onToggle }: { row: SubmissionRow; open: boolean; onToggle: () => void }) {
+function RowView({ row: r, open, onToggle, actions }: { row: SubmissionRow; open: boolean; onToggle: () => void; actions: Actions }) {
   return (
     <>
       <tr className="cursor-pointer border-t border-stone-100 hover:bg-stone-50" onClick={onToggle} aria-expanded={open}>
@@ -356,7 +361,7 @@ function RowView({ row: r, open, onToggle }: { row: SubmissionRow; open: boolean
       {open && (
         <tr className="bg-stone-50">
           <td colSpan={10} className="p-0">
-            <Detail row={r} />
+            <Detail row={r} actions={actions} />
           </td>
         </tr>
       )}

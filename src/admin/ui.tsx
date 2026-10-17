@@ -24,6 +24,8 @@ export function Card(props: { title: string; note?: string; children: ReactNode 
 export function problemText(status: string): string {
   if (status === 'forbidden') return 'This account does not have access.'
   if (status === 'unconfigured') return 'The ADMIN_EMAIL secret is not set on the server.'
+  if (status === 'implausible') return 'Those answers do not look possible, such as more experience than the age allows or income above $500,000.'
+  if (status === 'not_found') return 'That submission no longer exists.'
   if (status === 'bad_request') return 'The server rejected that request. Check the values and try again.'
   return 'Could not load the data. Try again shortly.'
 }
